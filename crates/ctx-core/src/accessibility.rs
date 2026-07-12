@@ -103,10 +103,11 @@ fn set_minimized(saved_windows: &[WindowInfo], minimized: bool) -> Result<(), Ac
         }
 
         let application = AXUIElement::application(current.pid);
-        let manual_accessibility =
-            AXAttribute::<CFType>::new(&CFString::from_static_string("AXManualAccessibility"));
-        let _ =
-            application.set_attribute(&manual_accessibility, CFBoolean::true_value().as_CFType());
+        for attribute_name in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
+            let attribute =
+                AXAttribute::<CFType>::new(&CFString::from_static_string(attribute_name));
+            let _ = application.set_attribute(&attribute, CFBoolean::true_value().as_CFType());
+        }
         thread::sleep(Duration::from_millis(250));
         let mut windows =
             application
