@@ -435,22 +435,26 @@ pub fn reconcile_windows(
                 .iter()
                 .find(|window| window.id == resolved_id)
         {
-            saved.id = current.id;
-            saved.pid = current.pid;
-            saved.owner.clone_from(&current.owner);
-            saved.title.clone_from(&current.title);
-            saved.bounds = current.bounds;
-
-            if current.bundle_id.is_some() {
-                saved.bundle_id.clone_from(&current.bundle_id);
-            }
-            if current.application_path.is_some() {
-                saved.application_path.clone_from(&current.application_path);
-            }
+            refresh_window_fingerprint(saved, current);
         }
     }
 
     statuses
+}
+
+pub(crate) fn refresh_window_fingerprint(saved: &mut WindowInfo, current: &WindowInfo) {
+    saved.id = current.id;
+    saved.pid = current.pid;
+    saved.owner.clone_from(&current.owner);
+    saved.title.clone_from(&current.title);
+    saved.bounds = current.bounds;
+
+    if current.bundle_id.is_some() {
+        saved.bundle_id.clone_from(&current.bundle_id);
+    }
+    if current.application_path.is_some() {
+        saved.application_path.clone_from(&current.application_path);
+    }
 }
 
 #[cfg(test)]
