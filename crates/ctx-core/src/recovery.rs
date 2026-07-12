@@ -5,11 +5,13 @@ use thiserror::Error;
 use crate::{RecoveryState, WindowInfo};
 
 mod editor;
+mod terminal;
 
 pub use editor::{
     AntigravityAdapter, AntigravityPlatform, SystemAntigravityPlatform, SystemVsCodePlatform,
     VsCodeAdapter, VsCodePlatform,
 };
+pub use terminal::{SystemWarpPlatform, WarpAdapter, WarpPlatform};
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum RecoveryError {
@@ -107,6 +109,10 @@ pub fn default_recovery_registry() -> RecoveryRegistry {
     for bundle_id in ["com.google.antigravity", "com.google.antigravity-ide"] {
         registry.register(bundle_id, adapter.clone());
     }
+    registry.register(
+        "dev.warp.Warp-Stable",
+        Arc::new(WarpAdapter::system()) as Arc<dyn RecoveryAdapter>,
+    );
     registry
 }
 
@@ -299,5 +305,6 @@ mod tests {
         assert!(registry.adapter_for("org.mozilla.firefox").is_none());
         assert!(registry.adapter_for("com.google.antigravity").is_some());
         assert!(registry.adapter_for("com.google.antigravity-ide").is_some());
+        assert!(registry.adapter_for("dev.warp.Warp-Stable").is_some());
     }
 }

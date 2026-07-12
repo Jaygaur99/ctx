@@ -30,6 +30,8 @@ pub enum RecoveryState {
     Terminal {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tabs: Vec<TerminalTabState>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_tab: Option<usize>,
     },
     Browser {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
