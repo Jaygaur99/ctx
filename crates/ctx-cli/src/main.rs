@@ -6,9 +6,10 @@ use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
 use clap::Parser;
 use cli::{Cli, Commands, WindowFilters};
 use ctx_core::{
-    AppPaths, Config, RuntimeState, WindowInfo, WindowResolution, WindowState, WindowStatus,
-    close_windows, inspect_windows, list_all_windows, list_windows, minimize_windows_best_effort,
-    reconcile_windows, resolve_window, switch_workspace,
+    AppPaths, Config, GenericAppAdapter, RecoveryRegistry, RuntimeState, WindowInfo,
+    WindowResolution, WindowState, WindowStatus, close_windows, inspect_windows, list_all_windows,
+    list_windows, minimize_windows_best_effort, reconcile_windows, resolve_window,
+    snapshot_workspace, switch_workspace,
 };
 use error::CliError;
 use serde_json::{Value, json};
@@ -47,6 +48,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Commands::ListAll { filters } => list_window_command(config, true, filters, json),
         Commands::Add { name, window_ids } => add_workspace(config, name, window_ids, json),
         Commands::Switch { name } => switch_to_workspace(config, name, json),
+        Commands::Snapshot { name } => snapshot(config, name, json),
         Commands::Status => show_status(config, json),
         Commands::HideAll => hide_all(config, json),
         Commands::Ignore { window_ids } => ignore_windows(config, window_ids, json),
@@ -55,6 +57,55 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Remove { name } => remove_workspace(config, name, json),
         Commands::Close { name } => close_workspace(config, name, json),
     }
+}
+
+fn snapshot(
+    config_override: Option<PathBuf>,
+    name: Option<String>,
+    json_output: bool,
+) -> Result<(), CliError> {
+    let app_paths = AppPaths::discover()?;
+    let config_path = config_override.unwrap_or(app_paths.config_file);
+    let mut config = Config::load(&config_path)?;
+    let state = RuntimeState::load(app_paths.runtime_file)?;
+    let name = name
+        .or(state.active_workspace)
+        .ok_or(CliError::NoActiveWorkspace)?;
+    let workspace = config
+        .workspaces
+        .get_mut(&name)
+        .ok_or_else(|| CliError::WorkspaceMissing { name: name.clone() })?;
+    let report = snapshot_workspace(
+        workspace,
+        &list_all_windows()?,
+        &RecoveryRegistry::new(),
+        &GenericAppAdapter,
+    )?;
+    config.save(&config_path)?;
+
+    if json_output {
+        print_json(json!({
+            "workspace": name,
+            "windows": report,
+            "config": config_path,
+        }))?;
+    } else {
+        let captured = report.iter().filter(|window| window.captured).count();
+        println!(
+            "Snapshotted {captured}/{} windows in workspace '{name}'.",
+            report.len()
+        );
+        for window in report {
+            if let Some(warning) = window.warning {
+                println!(
+                    "Warning for window {} ({}): {warning}",
+                    window.id, window.application
+                );
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn hide_all(config_override: Option<PathBuf>, json_output: bool) -> Result<(), CliError> {
@@ -228,6 +279,8 @@ fn list_window_command(
                     "id": window.id,
                     "pid": window.pid,
                     "application": window.owner,
+                    "bundle_id": window.bundle_id,
+                    "application_path": window.application_path,
                     "title": window.title,
                     "bounds": window.bounds,
                     "assigned_to": assignments.get(&window.id).cloned().unwrap_or_default(),

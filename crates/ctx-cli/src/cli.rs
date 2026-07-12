@@ -51,6 +51,12 @@ pub enum Commands {
         name: String,
     },
 
+    /// Capture durable recovery state for a workspace
+    Snapshot {
+        /// Workspace name; defaults to the active workspace
+        name: Option<String>,
+    },
+
     /// Show the current workspace
     Status,
 
@@ -193,6 +199,20 @@ mod tests {
         let cli = Cli::try_parse_from(["ctx", "close"]).unwrap();
 
         assert_eq!(cli.command, Commands::Close { name: None });
+    }
+
+    #[test]
+    fn parses_snapshot_with_optional_workspace() {
+        let active = Cli::try_parse_from(["ctx", "snapshot"]).unwrap();
+        let named = Cli::try_parse_from(["ctx", "snapshot", "coding"]).unwrap();
+
+        assert_eq!(active.command, Commands::Snapshot { name: None });
+        assert_eq!(
+            named.command,
+            Commands::Snapshot {
+                name: Some("coding".to_string())
+            }
+        );
     }
 
     #[test]

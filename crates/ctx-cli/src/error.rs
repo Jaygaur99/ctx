@@ -1,6 +1,6 @@
 use ctx_core::{
-    AccessibilityError, ConfigError, PathsError, RuntimeError, SwitchError, WindowError,
-    WindowState,
+    AccessibilityError, ConfigError, PathsError, RecoveryError, RuntimeError, SwitchError,
+    WindowError, WindowState,
 };
 use thiserror::Error;
 
@@ -20,6 +20,9 @@ pub enum CliError {
 
     #[error(transparent)]
     Accessibility(#[from] AccessibilityError),
+
+    #[error(transparent)]
+    Recovery(#[from] RecoveryError),
 
     #[error(transparent)]
     Switch(#[from] SwitchError),

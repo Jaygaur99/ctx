@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -9,6 +11,68 @@ pub struct WindowInfo {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<WindowBounds>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<RecoveryState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_warning: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RecoveryState {
+    Editor {
+        project_path: PathBuf,
+    },
+    Terminal {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tabs: Vec<TerminalTabState>,
+    },
+    Browser {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tabs: Vec<BrowserTabState>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_tab: Option<usize>,
+    },
+    Generic,
+}
+
+impl RecoveryState {
+    pub fn kind(&self) -> RecoveryKind {
+        match self {
+            Self::Editor { .. } => RecoveryKind::Editor,
+            Self::Terminal { .. } => RecoveryKind::Terminal,
+            Self::Browser { .. } => RecoveryKind::Browser,
+            Self::Generic => RecoveryKind::Generic,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryKind {
+    Editor,
+    Terminal,
+    Browser,
+    Generic,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalTabState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserTabState {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +141,8 @@ pub fn list_all_windows() -> Result<Vec<WindowInfo>, WindowError> {
 
 #[cfg(target_os = "macos")]
 fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowError> {
+    use std::collections::BTreeMap;
+
     use core_foundation::{
         array::CFArray,
         base::{CFType, TCFType},
@@ -109,6 +175,7 @@ fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowErro
     let layer_key = unsafe { CFString::wrap_under_get_rule(kCGWindowLayer) };
     let bounds_key = unsafe { CFString::wrap_under_get_rule(kCGWindowBounds) };
 
+    let mut application_identities = BTreeMap::new();
     let windows = windows
         .iter()
         .filter_map(|dictionary| {
@@ -155,17 +222,78 @@ fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowErro
                 .and_then(|value| value.downcast::<CFString>())
                 .map(|value| value.to_string())
                 .filter(|value| !value.is_empty())?;
+            let (bundle_id, application_path) = application_identities
+                .entry(pid)
+                .or_insert_with(|| application_identity(pid))
+                .clone();
             Some(WindowInfo {
                 id,
                 pid,
                 owner,
                 title: Some(title),
                 bounds: Some(bounds),
+                bundle_id,
+                application_path,
+                recovery: None,
+                recovery_warning: None,
             })
         })
         .collect();
 
     Ok(windows)
+}
+
+#[cfg(target_os = "macos")]
+#[allow(deprecated, unexpected_cfgs)]
+fn application_identity(pid: i32) -> (Option<String>, Option<PathBuf>) {
+    use std::ffi::CStr;
+
+    use cocoa::{
+        appkit::NSRunningApplication,
+        base::{id, nil},
+        foundation::{NSAutoreleasePool, NSString},
+    };
+    use objc::{msg_send, sel, sel_impl};
+
+    unsafe fn string_value(value: id) -> Option<String> {
+        if value == nil {
+            return None;
+        }
+
+        let bytes = unsafe { value.UTF8String() };
+        if bytes.is_null() {
+            return None;
+        }
+
+        Some(
+            unsafe { CStr::from_ptr(bytes) }
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+
+    unsafe {
+        let pool = NSAutoreleasePool::new(nil);
+        let application = NSRunningApplication::runningApplicationWithProcessIdentifier(nil, pid);
+        if application == nil {
+            pool.drain();
+            return (None, None);
+        }
+
+        let bundle_identifier: id = msg_send![application, bundleIdentifier];
+        let bundle_url: id = msg_send![application, bundleURL];
+        let bundle_path: id = if bundle_url == nil {
+            nil
+        } else {
+            msg_send![bundle_url, path]
+        };
+        let identity = (
+            string_value(bundle_identifier),
+            string_value(bundle_path).map(PathBuf::from),
+        );
+        pool.drain();
+        identity
+    }
 }
 
 impl WindowBounds {
@@ -305,7 +433,18 @@ pub fn reconcile_windows(
                 .iter()
                 .find(|window| window.id == resolved_id)
         {
-            *saved = current.clone();
+            saved.id = current.id;
+            saved.pid = current.pid;
+            saved.owner.clone_from(&current.owner);
+            saved.title.clone_from(&current.title);
+            saved.bounds = current.bounds;
+
+            if current.bundle_id.is_some() {
+                saved.bundle_id.clone_from(&current.bundle_id);
+            }
+            if current.application_path.is_some() {
+                saved.application_path.clone_from(&current.application_path);
+            }
         }
     }
 
@@ -354,6 +493,10 @@ mod tests {
                 width: 800,
                 height: 600,
             }),
+            bundle_id: None,
+            application_path: None,
+            recovery: None,
+            recovery_warning: None,
         }
     }
 
@@ -389,6 +532,38 @@ mod tests {
             resolve_window(&saved, &[first, second]),
             WindowResolution::Ambiguous(_)
         ));
+    }
+
+    #[test]
+    fn reconciliation_preserves_recovery_metadata() {
+        let mut saved = window(1, "Code", "old title", 10);
+        saved.bundle_id = Some("com.microsoft.VSCode".to_string());
+        saved.application_path = Some(PathBuf::from("/Applications/Visual Studio Code.app"));
+        saved.recovery = Some(RecoveryState::Editor {
+            project_path: PathBuf::from("/tmp/project"),
+        });
+        saved.recovery_warning = Some("captured with fallback".to_string());
+
+        let current = window(99, "Code", "new title", 12);
+        reconcile_windows(std::slice::from_mut(&mut saved), &[current]);
+
+        assert_eq!(saved.id, 99);
+        assert_eq!(saved.title.as_deref(), Some("new title"));
+        assert_eq!(saved.bundle_id.as_deref(), Some("com.microsoft.VSCode"));
+        assert_eq!(
+            saved.application_path.as_deref(),
+            Some(std::path::Path::new("/Applications/Visual Studio Code.app"))
+        );
+        assert_eq!(
+            saved.recovery,
+            Some(RecoveryState::Editor {
+                project_path: PathBuf::from("/tmp/project"),
+            })
+        );
+        assert_eq!(
+            saved.recovery_warning.as_deref(),
+            Some("captured with fallback")
+        );
     }
 }
 
