@@ -14,9 +14,10 @@ pub use accessibility::{
 pub use config::{Config, ConfigError, Service, Workspace};
 pub use paths::{AppPaths, PathsError};
 pub use recovery::{
-    AntigravityAdapter, AntigravityPlatform, GenericAppAdapter, RecoveryAdapter, RecoveryError,
-    RecoveryRegistry, SystemAntigravityPlatform, SystemVsCodePlatform, SystemWarpPlatform,
-    VsCodeAdapter, VsCodePlatform, WarpAdapter, WarpPlatform, default_recovery_registry,
+    AntigravityAdapter, AntigravityPlatform, FirefoxAdapter, FirefoxPlatform, GenericAppAdapter,
+    RecoveryAdapter, RecoveryError, RecoveryRegistry, SystemAntigravityPlatform,
+    SystemFirefoxPlatform, SystemVsCodePlatform, SystemWarpPlatform, VsCodeAdapter, VsCodePlatform,
+    WarpAdapter, WarpPlatform, default_recovery_registry,
 };
 pub use runtime::{RuntimeError, RuntimeState};
 pub use snapshot::{SnapshotWindowReport, snapshot_workspace};

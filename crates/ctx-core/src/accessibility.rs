@@ -219,7 +219,7 @@ fn set_window_minimized(current: &WindowInfo, minimized: bool) -> Result<(), Acc
 }
 
 #[cfg(target_os = "macos")]
-fn accessibility_window(
+pub(crate) fn accessibility_window(
     current: &WindowInfo,
     activate_application: bool,
 ) -> Result<accessibility::ui_element::AXUIElement, AccessibilityError> {

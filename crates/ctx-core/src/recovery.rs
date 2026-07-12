@@ -4,8 +4,11 @@ use thiserror::Error;
 
 use crate::{RecoveryState, WindowInfo};
 
+mod browser;
 mod editor;
 mod terminal;
+
+pub use browser::{FirefoxAdapter, FirefoxPlatform, SystemFirefoxPlatform};
 
 pub use editor::{
     AntigravityAdapter, AntigravityPlatform, SystemAntigravityPlatform, SystemVsCodePlatform,
@@ -112,6 +115,10 @@ pub fn default_recovery_registry() -> RecoveryRegistry {
     registry.register(
         "dev.warp.Warp-Stable",
         Arc::new(WarpAdapter::system()) as Arc<dyn RecoveryAdapter>,
+    );
+    registry.register(
+        "org.mozilla.firefox",
+        Arc::new(FirefoxAdapter::system()) as Arc<dyn RecoveryAdapter>,
     );
     registry
 }
@@ -302,7 +309,7 @@ mod tests {
                 .adapter_for("com.microsoft.VSCodeInsiders")
                 .is_some()
         );
-        assert!(registry.adapter_for("org.mozilla.firefox").is_none());
+        assert!(registry.adapter_for("org.mozilla.firefox").is_some());
         assert!(registry.adapter_for("com.google.antigravity").is_some());
         assert!(registry.adapter_for("com.google.antigravity-ide").is_some());
         assert!(registry.adapter_for("dev.warp.Warp-Stable").is_some());
