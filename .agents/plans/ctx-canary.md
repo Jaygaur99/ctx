@@ -9,7 +9,7 @@ Tauri, Git automation, brain-state notes, macOS Spaces, and public distribution 
 ## Completed
 
 - [x] Create the Cargo workspace with `ctx-core` and `ctx-cli`.
-- [x] Add the Clap commands `init`, `list`, `listAll`, `add`, `switch`, `status`, `show`, `remove`, `close`, and `hideAll`.
+- [x] Add the Clap commands `init`, `list`, `listAll`, `add`, `switch`, `status`, `show`, `remove`, `close`, `hideAll`, `ignore`, and `unignore`.
 - [x] Resolve standard macOS config, data, and log paths.
 - [x] Create and validate `workspaces.yaml` with typed errors.
 - [x] List visible windows with Core Graphics.
@@ -32,6 +32,7 @@ Tauri, Git automation, brain-state notes, macOS Spaces, and public distribution 
 - [x] Replace boxed CLI failures with structured errors and consistent exit codes.
 - [x] Add global `--json` output for every CLI command and JSON errors.
 - [x] Add `ctx hideAll` to minimize windows outside the active workspace.
+- [x] Persist ignored window fingerprints that `hideAll` must leave untouched.
 - [x] Verify a real two-way switch between ChatGPT and VS Code.
 - [x] Verify stale-ID refresh from a fake ID to the current Warp window ID.
 - [x] Verify add/show/close/remove against a disposable TextEdit window and temporary config.

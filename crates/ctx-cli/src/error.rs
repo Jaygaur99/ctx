@@ -36,6 +36,9 @@ pub enum CliError {
     #[error("window {id} is not selectable; run `ctx listAll` again")]
     WindowNotSelectable { id: u32 },
 
+    #[error("window {id} is not ignored; run `ctx listAll` to inspect exclusions")]
+    WindowNotIgnored { id: u32 },
+
     #[error("workspace '{workspace}' window {id} is {state:?}")]
     WindowUnavailable {
         workspace: String,
@@ -53,6 +56,7 @@ impl CliError {
             Self::WorkspaceMissing { .. }
             | Self::NoActiveWorkspace
             | Self::WindowNotSelectable { .. }
+            | Self::WindowNotIgnored { .. }
             | Self::WindowUnavailable { .. }
             | Self::Config(ConfigError::WorkspaceMissing { .. })
             | Self::Config(ConfigError::WorkspaceAlreadyExists { .. })

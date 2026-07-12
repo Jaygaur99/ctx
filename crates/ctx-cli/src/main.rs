@@ -49,6 +49,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Switch { name } => switch_to_workspace(config, name, json),
         Commands::Status => show_status(config, json),
         Commands::HideAll => hide_all(config, json),
+        Commands::Ignore { window_ids } => ignore_windows(config, window_ids, json),
+        Commands::Unignore { window_ids } => unignore_windows(config, window_ids, json),
         Commands::Show { name } => show_workspace(config, name, json),
         Commands::Remove { name } => remove_workspace(config, name, json),
         Commands::Close { name } => close_workspace(config, name, json),
@@ -73,9 +75,14 @@ fn hide_all(config_override: Option<PathBuf>, json_output: bool) -> Result<(), C
     ensure_windows_resolved(&active_name, &statuses)?;
     let active_ids: std::collections::BTreeSet<_> =
         active.windows.iter().map(|window| window.id).collect();
+    let ignored_statuses = reconcile_windows(&mut config.ignored_windows, &current_windows);
+    let ignored_ids: std::collections::BTreeSet<_> = ignored_statuses
+        .into_iter()
+        .filter_map(|status| status.resolved_id)
+        .collect();
     let windows_to_hide: Vec<_> = current_windows
         .into_iter()
-        .filter(|window| !active_ids.contains(&window.id))
+        .filter(|window| !active_ids.contains(&window.id) && !ignored_ids.contains(&window.id))
         .collect();
     let report = minimize_windows_best_effort(&windows_to_hide)?;
 
@@ -99,6 +106,82 @@ fn hide_all(config_override: Option<PathBuf>, json_output: bool) -> Result<(), C
                 failure.id, failure.owner, failure.error
             );
         }
+    }
+
+    Ok(())
+}
+
+fn ignore_windows(
+    config_override: Option<PathBuf>,
+    window_ids: Vec<u32>,
+    json_output: bool,
+) -> Result<(), CliError> {
+    let config_path = resolve_config_path(config_override)?;
+    let mut config = Config::load(&config_path)?;
+    let current_windows = list_all_windows()?;
+    reconcile_windows(&mut config.ignored_windows, &current_windows);
+    let available: BTreeMap<_, _> = current_windows
+        .into_iter()
+        .map(|window| (window.id, window))
+        .collect();
+    let mut ignored = Vec::new();
+
+    for id in window_ids {
+        let window = available
+            .get(&id)
+            .ok_or(CliError::WindowNotSelectable { id })?;
+        if !config
+            .ignored_windows
+            .iter()
+            .any(|ignored| ignored.id == id)
+        {
+            config.ignored_windows.push(window.clone());
+            ignored.push(window.clone());
+        }
+    }
+
+    config.save(&config_path)?;
+    if json_output {
+        print_json(json!({ "ignored": ignored, "config": config_path }))?;
+    } else {
+        println!("Ignored {} windows for hideAll.", ignored.len());
+    }
+
+    Ok(())
+}
+
+fn unignore_windows(
+    config_override: Option<PathBuf>,
+    window_ids: Vec<u32>,
+    json_output: bool,
+) -> Result<(), CliError> {
+    let config_path = resolve_config_path(config_override)?;
+    let mut config = Config::load(&config_path)?;
+    reconcile_windows(&mut config.ignored_windows, &list_all_windows()?);
+
+    for id in &window_ids {
+        if !config
+            .ignored_windows
+            .iter()
+            .any(|ignored| ignored.id == *id)
+        {
+            return Err(CliError::WindowNotIgnored { id: *id });
+        }
+    }
+
+    let ids: std::collections::BTreeSet<_> = window_ids.into_iter().collect();
+    config
+        .ignored_windows
+        .retain(|window| !ids.contains(&window.id));
+    config.save(&config_path)?;
+
+    if json_output {
+        print_json(json!({ "unignored": ids, "config": config_path }))?;
+    } else {
+        println!(
+            "Removed {} windows from the hideAll ignore list.",
+            ids.len()
+        );
     }
 
     Ok(())
@@ -398,6 +481,15 @@ fn assignment_map(config: &Config, current_windows: &[WindowInfo]) -> BTreeMap<u
                     .or_default()
                     .push(name.clone());
             }
+        }
+    }
+
+    for saved in &config.ignored_windows {
+        if let WindowResolution::Resolved(current) = resolve_window(saved, current_windows) {
+            assignments
+                .entry(current.id)
+                .or_default()
+                .push("<ignored>".to_string());
         }
     }
 

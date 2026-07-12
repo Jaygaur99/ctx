@@ -58,6 +58,20 @@ pub enum Commands {
     #[command(name = "hideAll", visible_aliases = ["hide-all", "hidall"])]
     HideAll,
 
+    /// Exclude windows from hideAll
+    Ignore {
+        /// Window IDs shown by `ctx listAll`
+        #[arg(required = true, num_args = 1..)]
+        window_ids: Vec<u32>,
+    },
+
+    /// Remove windows from the hideAll exclusion list
+    Unignore {
+        /// Current window IDs shown by `ctx listAll`
+        #[arg(required = true, num_args = 1..)]
+        window_ids: Vec<u32>,
+    },
+
     /// Show one workspace and its live window state
     Show {
         /// Workspace name
@@ -188,6 +202,25 @@ mod tests {
 
             assert_eq!(cli.command, Commands::HideAll);
         }
+    }
+
+    #[test]
+    fn parses_ignore_commands() {
+        let ignore = Cli::try_parse_from(["ctx", "ignore", "42", "57"]).unwrap();
+        let unignore = Cli::try_parse_from(["ctx", "unignore", "42"]).unwrap();
+
+        assert_eq!(
+            ignore.command,
+            Commands::Ignore {
+                window_ids: vec![42, 57]
+            }
+        );
+        assert_eq!(
+            unignore.command,
+            Commands::Unignore {
+                window_ids: vec![42]
+            }
+        );
     }
 
     #[test]
