@@ -1,6 +1,31 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("failed to read config at {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("invalid YAML at {path}: {source}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: serde_yaml::Error,
+    },
+
+    #[error("unsupported config version {found}; expected version 1")]
+    UnsupportedVersion { found: u32 },
+}
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 pub struct Config {
@@ -35,6 +60,28 @@ pub enum Service {
 }
 
 impl Config {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
+        let path = path.as_ref();
+
+        let yaml = fs::read_to_string(path).map_err(|source| ConfigError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        let config = Self::from_yaml(&yaml).map_err(|source| ConfigError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        if config.version != 1 {
+            return Err(ConfigError::UnsupportedVersion {
+                found: config.version,
+            });
+        }
+
+        Ok(config)
+    }
+
     pub fn from_yaml(yaml: &str) -> Result<Self, serde_yaml::Error> {
         serde_yaml::from_str(yaml)
     }
@@ -47,6 +94,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     const YAML: &str = r#"
 version: 1
@@ -110,5 +158,49 @@ workspaces:
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn loads_config_from_file() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("workspaces.yaml");
+
+        fs::write(&path, YAML).unwrap();
+
+        let config = Config::load(&path).unwrap();
+
+        assert!(config.workspace("devlayout").is_some());
+    }
+
+    #[test]
+    fn reports_missing_config_file() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("missing.yaml");
+
+        let error = Config::load(&path).unwrap_err();
+
+        assert!(matches!(error, ConfigError::Read { .. }));
+    }
+
+    #[test]
+    fn rejects_unsupported_config_version() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("workspaces.yaml");
+
+        fs::write(
+            &path,
+            r#"
+version: 2
+workspaces: {}
+"#,
+        )
+        .unwrap();
+
+        let error = Config::load(&path).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigError::UnsupportedVersion { found: 2 }
+        ));
     }
 }
