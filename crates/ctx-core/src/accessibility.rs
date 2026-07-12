@@ -95,12 +95,10 @@ fn set_minimized(saved_windows: &[WindowInfo], minimized: bool) -> Result<(), Ac
             .find(|window| window.id == saved.id && window.owner == saved.owner)
             .ok_or(AccessibilityError::WindowMissing { id: saved.id })?;
 
-        if !minimized {
-            let _ = Command::new("/usr/bin/open")
-                .args(["-a", &current.owner])
-                .status();
-            thread::sleep(Duration::from_millis(250));
-        }
+        let _ = Command::new("/usr/bin/open")
+            .args(["-a", &current.owner])
+            .status();
+        thread::sleep(Duration::from_millis(250));
 
         let application = AXUIElement::application(current.pid);
         for attribute_name in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
