@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Arc,
     thread,
@@ -45,7 +45,7 @@ impl FirefoxPlatform for SystemFirefoxPlatform {
             ));
         }
 
-        let before: std::collections::BTreeSet<_> = crate::list_all_windows()
+        let mut before: std::collections::BTreeSet<_> = crate::list_all_windows()
             .map_err(|error| RecoveryError::Restore(error.to_string()))?
             .into_iter()
             .filter(|candidate| same_bundle_id(window, candidate))
@@ -57,12 +57,49 @@ impl FirefoxPlatform for SystemFirefoxPlatform {
             .map(|path| path.join("Contents/MacOS/firefox"))
             .filter(|path| path.is_file())
             .unwrap_or_else(|| PathBuf::from("/Applications/Firefox.app/Contents/MacOS/firefox"));
-        let mut command = Command::new(&executable);
-        command.args(["--new-window", &tabs[0].url]);
-        for tab in &tabs[1..] {
-            command.args(["--new-tab", &tab.url]);
+        let normalized_tabs: Vec<_> = tabs
+            .iter()
+            .map(|tab| normalize_firefox_location(&tab.url, tab.title.as_deref()))
+            .collect();
+        if !firefox_is_running(window.bundle_id.as_deref()) {
+            let application = window
+                .application_path
+                .as_deref()
+                .unwrap_or_else(|| Path::new("/Applications/Firefox.app"));
+            Command::new("/usr/bin/open")
+                .arg("-a")
+                .arg(application)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|error| {
+                    RecoveryError::Restore(format!(
+                        "could not start Firefox with {}: {error}",
+                        application.display()
+                    ))
+                })?;
+
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while Instant::now() < deadline {
+                let windows = crate::list_all_windows()
+                    .map_err(|error| RecoveryError::Restore(error.to_string()))?;
+                let firefox_windows: Vec<_> = windows
+                    .iter()
+                    .filter(|candidate| same_bundle_id(window, candidate))
+                    .collect();
+                if firefox_windows.iter().any(|candidate| {
+                    firefox_window_title_matches(window, tabs, active_tab, candidate)
+                }) {
+                    return Ok(());
+                }
+                before.extend(firefox_windows.into_iter().map(|candidate| candidate.id));
+                thread::sleep(Duration::from_millis(250));
+            }
         }
-        command
+
+        Command::new(&executable)
+            .args(["--new-window", &normalized_tabs[0]])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -74,9 +111,6 @@ impl FirefoxPlatform for SystemFirefoxPlatform {
                 ))
             })?;
 
-        let Some(active_tab) = active_tab else {
-            return Ok(());
-        };
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
             let windows = crate::list_all_windows()
@@ -84,8 +118,29 @@ impl FirefoxPlatform for SystemFirefoxPlatform {
             if let Some(restored) = windows.iter().find(|candidate| {
                 same_bundle_id(window, candidate) && !before.contains(&candidate.id)
             }) {
-                select_firefox_tab(restored, active_tab)
+                crate::restore_windows(std::slice::from_ref(restored))
                     .map_err(|error| RecoveryError::Restore(error.to_string()))?;
+                for url in &normalized_tabs[1..] {
+                    Command::new(&executable)
+                        .args(["--new-tab", url])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()
+                        .map_err(|error| {
+                            RecoveryError::Restore(format!(
+                                "could not add Firefox tab {url} with {}: {error}",
+                                executable.display()
+                            ))
+                        })?;
+                    thread::sleep(Duration::from_millis(250));
+                }
+
+                thread::sleep(Duration::from_millis(500));
+                if let Some(active_tab) = active_tab {
+                    select_firefox_tab(restored, active_tab)
+                        .map_err(|error| RecoveryError::Restore(error.to_string()))?;
+                }
                 return Ok(());
             }
             thread::sleep(Duration::from_millis(250));
@@ -95,6 +150,37 @@ impl FirefoxPlatform for SystemFirefoxPlatform {
             "Firefox window did not appear within 20 seconds".to_string(),
         ))
     }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(deprecated, unexpected_cfgs)]
+fn firefox_is_running(bundle_id: Option<&str>) -> bool {
+    use cocoa::{
+        base::{id, nil},
+        foundation::{NSAutoreleasePool, NSString},
+    };
+    use objc::{class, msg_send, sel, sel_impl};
+
+    let Some(bundle_id) = bundle_id else {
+        return false;
+    };
+    unsafe {
+        let pool = NSAutoreleasePool::new(nil);
+        let identifier = NSString::alloc(nil).init_str(bundle_id);
+        let applications: id = msg_send![
+            class!(NSRunningApplication),
+            runningApplicationsWithBundleIdentifier: identifier
+        ];
+        let count: usize = msg_send![applications, count];
+        let _: () = msg_send![identifier, release];
+        pool.drain();
+        count > 0
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn firefox_is_running(_bundle_id: Option<&str>) -> bool {
+    false
 }
 
 pub struct FirefoxAdapter {
@@ -135,15 +221,24 @@ impl RecoveryAdapter for FirefoxAdapter {
             return false;
         };
 
-        let expected_title = active_tab
-            .and_then(|index| tabs.get(index))
-            .and_then(|tab| tab.title.as_deref())
-            .or(saved.title.as_deref());
-
-        expected_title
-            .zip(candidate.title.as_deref())
-            .is_some_and(|(expected, actual)| firefox_titles_match(expected, actual))
+        firefox_window_title_matches(saved, tabs, *active_tab, candidate)
     }
+}
+
+fn firefox_window_title_matches(
+    saved: &WindowInfo,
+    tabs: &[BrowserTabState],
+    active_tab: Option<usize>,
+    candidate: &WindowInfo,
+) -> bool {
+    let expected_title = active_tab
+        .and_then(|index| tabs.get(index))
+        .and_then(|tab| tab.title.as_deref())
+        .or(saved.title.as_deref());
+
+    expected_title
+        .zip(candidate.title.as_deref())
+        .is_some_and(|(expected, actual)| firefox_titles_match(expected, actual))
 }
 
 fn firefox_titles_match(expected: &str, actual: &str) -> bool {
@@ -194,11 +289,6 @@ fn capture_firefox_tabs(
     if tabs.is_empty() {
         return Err(crate::AccessibilityError::DocumentUnavailable { id: window.id });
     }
-    let address = elements
-        .iter()
-        .find(|element| is_firefox_address(element))
-        .cloned();
-
     let active_tab = tabs.iter().position(|tab| {
         tab.value()
             .ok()
@@ -212,17 +302,20 @@ fn capture_firefox_tabs(
                 id: window.id,
                 source,
             })?;
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(250));
         let title = tab
             .title()
             .ok()
             .map(|value| value.to_string())
             .filter(|value| !value.is_empty());
-        let url = address
-            .as_ref()
+        let refreshed_window = crate::accessibility::accessibility_window(window, false)?;
+        let location = descendants(&refreshed_window)
+            .iter()
+            .find(|element| is_firefox_address(element))
             .and_then(firefox_address)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "about:newtab".to_string());
+        let url = normalize_firefox_location(&location, title.as_deref());
         captured.push(BrowserTabState { url, title });
     }
     if let Some(active_tab) = active_tab {
@@ -316,6 +409,43 @@ fn firefox_address(element: &accessibility::ui_element::AXUIElement) -> Option<S
         .ok()?
         .downcast::<CFString>()
         .map(|value| value.to_string())
+}
+
+fn normalize_firefox_location(location: &str, _title: Option<&str>) -> String {
+    let location = location.trim();
+    if location.contains("://")
+        || ["about:", "file:", "view-source:"]
+            .iter()
+            .any(|prefix| location.starts_with(prefix))
+    {
+        return location.to_string();
+    }
+
+    if !location.chars().any(char::is_whitespace)
+        && (location.contains('.') || location.starts_with("localhost"))
+    {
+        return format!("https://{location}");
+    }
+
+    format!(
+        "https://www.google.com/search?q={}",
+        encode_query_component(location)
+    )
+}
+
+fn encode_query_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else if byte == b' ' {
+            encoded.push('+');
+        } else {
+            use std::fmt::Write;
+            write!(encoded, "%{byte:02X}").expect("writing to a String cannot fail");
+        }
+    }
+    encoded
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -422,5 +552,24 @@ mod tests {
         recovered.title = Some("Mozilla Firefox".to_string());
         assert!(!adapter.matches(&saved, &recovered));
         assert_eq!(*platform.capture_calls.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn normalizes_firefox_address_bar_locations_for_relaunch() {
+        assert_eq!(
+            normalize_firefox_location("https://example.com/path", Some("Example")),
+            "https://example.com/path"
+        );
+        assert_eq!(
+            normalize_firefox_location("www.rust-lang.org/learn", Some("Learn")),
+            "https://www.rust-lang.org/learn"
+        );
+        assert_eq!(
+            normalize_firefox_location(
+                "how to change commit datetime",
+                Some("how to change commit datetime - Google Search")
+            ),
+            "https://www.google.com/search?q=how+to+change+commit+datetime"
+        );
     }
 }
