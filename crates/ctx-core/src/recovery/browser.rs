@@ -131,16 +131,31 @@ impl RecoveryAdapter for FirefoxAdapter {
         if !same_bundle_id(saved, candidate) {
             return false;
         }
-        let Some(RecoveryState::Browser {
-            tabs: saved_tabs, ..
-        }) = &saved.recovery
-        else {
+        let Some(RecoveryState::Browser { tabs, active_tab }) = &saved.recovery else {
             return false;
         };
-        self.platform
-            .capture_tabs(candidate)
-            .is_ok_and(|(candidate_tabs, _)| candidate_tabs == *saved_tabs)
+
+        let expected_title = active_tab
+            .and_then(|index| tabs.get(index))
+            .and_then(|tab| tab.title.as_deref())
+            .or(saved.title.as_deref());
+
+        expected_title
+            .zip(candidate.title.as_deref())
+            .is_some_and(|(expected, actual)| firefox_titles_match(expected, actual))
     }
+}
+
+fn firefox_titles_match(expected: &str, actual: &str) -> bool {
+    fn normalize(title: &str) -> &str {
+        title
+            .strip_suffix(" — Mozilla Firefox")
+            .or_else(|| title.strip_suffix(" - Mozilla Firefox"))
+            .unwrap_or(title)
+            .trim()
+    }
+
+    normalize(expected).eq_ignore_ascii_case(normalize(actual))
 }
 
 fn same_bundle_id(first: &WindowInfo, second: &WindowInfo) -> bool {
@@ -327,6 +342,7 @@ mod tests {
     struct FakePlatform {
         tabs: Vec<BrowserTabState>,
         active_tab: Option<usize>,
+        capture_calls: Mutex<usize>,
         launches: Mutex<Vec<Vec<BrowserTabState>>>,
     }
 
@@ -335,6 +351,7 @@ mod tests {
             &self,
             _window: &WindowInfo,
         ) -> Result<(Vec<BrowserTabState>, Option<usize>), RecoveryError> {
+            *self.capture_calls.lock().unwrap() += 1;
             Ok((self.tabs.clone(), self.active_tab))
         }
 
@@ -381,6 +398,7 @@ mod tests {
         let platform = Arc::new(FakePlatform {
             tabs: tabs(),
             active_tab: Some(1),
+            capture_calls: Mutex::new(0),
             launches: Mutex::new(Vec::new()),
         });
         let adapter = FirefoxAdapter::new(platform.clone());
@@ -398,6 +416,11 @@ mod tests {
             }
         );
         assert_eq!(*platform.launches.lock().unwrap(), [tabs()]);
-        assert!(adapter.matches(&saved, &window(99)));
+        let mut recovered = window(99);
+        recovered.title = Some("Two — Mozilla Firefox".to_string());
+        assert!(adapter.matches(&saved, &recovered));
+        recovered.title = Some("Mozilla Firefox".to_string());
+        assert!(!adapter.matches(&saved, &recovered));
+        assert_eq!(*platform.capture_calls.lock().unwrap(), 1);
     }
 }
