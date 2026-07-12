@@ -375,6 +375,7 @@ workspaces: {}
                     pid: 100,
                     owner: "Visual Studio Code".to_string(),
                     title: Some("devLayout".to_string()),
+                    bounds: None,
                 }],
             )
             .unwrap();

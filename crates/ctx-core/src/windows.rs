@@ -7,6 +7,16 @@ pub struct WindowInfo {
     pub pid: i32,
     pub owner: String,
     pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<WindowBounds>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowBounds {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 #[derive(Debug, Error)]
@@ -43,9 +53,10 @@ fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowErro
         number::CFNumber,
         string::CFString,
     };
+    use core_graphics::geometry::CGRect;
     use core_graphics::window::{
-        copy_window_info, kCGNullWindowID, kCGWindowLayer, kCGWindowName, kCGWindowNumber,
-        kCGWindowOwnerName, kCGWindowOwnerPID,
+        copy_window_info, kCGNullWindowID, kCGWindowBounds, kCGWindowLayer, kCGWindowName,
+        kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID,
     };
 
     let raw_windows =
@@ -59,6 +70,7 @@ fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowErro
     let owner_key = unsafe { CFString::wrap_under_get_rule(kCGWindowOwnerName) };
     let title_key = unsafe { CFString::wrap_under_get_rule(kCGWindowName) };
     let layer_key = unsafe { CFString::wrap_under_get_rule(kCGWindowLayer) };
+    let bounds_key = unsafe { CFString::wrap_under_get_rule(kCGWindowBounds) };
 
     let windows = windows
         .iter()
@@ -91,12 +103,23 @@ fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowErro
                 .and_then(|value| value.downcast::<CFString>())
                 .map(|value| value.to_string())
                 .filter(|value| !value.is_empty());
+            let bounds = dictionary
+                .find(&bounds_key)
+                .and_then(|value| value.downcast::<CFDictionary>())
+                .and_then(|value| CGRect::from_dict_representation(&value))
+                .map(|bounds| WindowBounds {
+                    x: bounds.origin.x.round() as i32,
+                    y: bounds.origin.y.round() as i32,
+                    width: bounds.size.width.round() as i32,
+                    height: bounds.size.height.round() as i32,
+                });
 
             Some(WindowInfo {
                 id,
                 pid,
                 owner,
                 title,
+                bounds,
             })
         })
         .collect();
