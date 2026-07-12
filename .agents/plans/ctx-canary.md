@@ -9,20 +9,33 @@ Tauri, Git automation, brain-state notes, macOS Spaces, and public distribution 
 ## Completed
 
 - [x] Create the Cargo workspace with `ctx-core` and `ctx-cli`.
-- [x] Add the Clap commands `init`, `list`, `listAll`, `add`, `switch`, `status`, and the `close` placeholder.
+- [x] Add the Clap commands `init`, `list`, `listAll`, `add`, `switch`, `status`, `show`, `remove`, `close`, `hideAll`, `ignore`, and `unignore`.
 - [x] Resolve standard macOS config, data, and log paths.
 - [x] Create and validate `workspaces.yaml` with typed errors.
 - [x] List visible windows with Core Graphics.
 - [x] List minimized/off-screen windows across all macOS Desktops with `listAll`.
 - [x] Save selected window IDs, PIDs, owners, titles, and geometry with `ctx add`.
 - [x] Detect and request macOS Accessibility permission.
+- [x] Detect and request macOS Screen Recording permission for window titles.
 - [x] Resolve saved windows to Accessibility elements using title and geometry fingerprints.
 - [x] Support Electron applications such as VS Code by activating them before restore.
 - [x] Minimize and restore individual windows without hiding or quitting the owning application.
 - [x] Persist the active workspace atomically in `runtime.json`.
 - [x] Implement `ctx switch <name>` with an attempt to restore the previous workspace if target activation fails.
 - [x] Report the active workspace through `ctx status`.
+- [x] Reconcile stale Core Graphics IDs by application, title, and geometry fingerprints.
+- [x] Report saved windows as visible, minimized, ambiguous, or missing.
+- [x] Implement exact tracked-window closing with `ctx close [name]`.
+- [x] Add `ctx show <name>` for one workspace's live state.
+- [x] Add `ctx remove <name>` and clear matching active runtime state.
+- [x] Add application/PID filters and assigned-workspace markers to window listings.
+- [x] Replace boxed CLI failures with structured errors and consistent exit codes.
+- [x] Add global `--json` output for every CLI command and JSON errors.
+- [x] Add `ctx hideAll` to minimize windows outside the active workspace.
+- [x] Persist ignored window fingerprints that `hideAll` must leave untouched.
 - [x] Verify a real two-way switch between ChatGPT and VS Code.
+- [x] Verify stale-ID refresh from a fake ID to the current Warp window ID.
+- [x] Verify add/show/close/remove against a disposable TextEdit window and temporary config.
 - [x] Pass all workspace tests and strict Clippy checks.
 
 Completed checkpoint commits:
@@ -30,17 +43,19 @@ Completed checkpoint commits:
 - `cec8a49 feat: add accessibility window controls`
 - `eb3fbc0 feat: persist active workspace state`
 - `4d2ac5a feat: implement workspace switching`
+- `78193f9 feat: reconcile and manage workspace windows`
+- `7e60117 feat: complete workspace lifecycle CLI`
 
-## Remaining CLI Work
+## Completed CLI Work
 
-- [ ] Reconcile stale Core Graphics IDs after an application or window restarts.
-- [ ] Report each saved window as visible, minimized, ambiguous, or missing in `ctx status`.
-- [ ] Implement `ctx close [name]` for exact tracked windows without quitting unrelated windows.
-- [ ] Add `ctx show <name>` to inspect one workspace.
-- [ ] Add `ctx remove <name>` to delete a workspace and clean stale runtime state.
-- [ ] Improve `list` and `listAll` with application/PID filters and assigned-workspace markers.
-- [ ] Replace boxed CLI errors with structured error types and consistent exit codes.
-- [ ] Add optional machine-readable output for future Tauri integration.
+- [x] Reconcile stale Core Graphics IDs after an application or window restarts.
+- [x] Report each saved window as visible, minimized, ambiguous, or missing in `ctx status`.
+- [x] Implement `ctx close [name]` for exact tracked windows without quitting unrelated windows.
+- [x] Add `ctx show <name>` to inspect one workspace.
+- [x] Add `ctx remove <name>` to delete a workspace and clean stale runtime state.
+- [x] Improve `list` and `listAll` with application/PID filters and assigned-workspace markers.
+- [x] Replace boxed CLI errors with structured error types and consistent exit codes.
+- [x] Add optional machine-readable output for future Tauri integration.
 
 ## Deferred Service Work
 
@@ -71,10 +86,10 @@ Persistent files:
 
 Current smoke workspaces:
 
-- `smoke-chat` tracks the ChatGPT window.
-- `smoke-code` tracks the VS Code window.
+- `coding` tracks the selected editor and terminal windows.
+- `research` tracks the selected research windows.
 
-Core Graphics window IDs are live-session identifiers. The current canary expects tracked windows to remain open; restarting an application can make its saved ID stale.
+Core Graphics window IDs are live-session identifiers. Ctx refreshes stale IDs when a unique application/title or application/geometry match exists; otherwise the window is reported as ambiguous or missing.
 
 ## Manual Smoke Test
 
@@ -88,16 +103,23 @@ cargo run -p ctx-cli -- list
 # Show windows across all Desktops, including minimized windows.
 cargo run -p ctx-cli -- listAll
 
+# Filter and inspect assignments.
+cargo run -p ctx-cli -- listAll --app code
+cargo run -p ctx-cli -- show coding
+
+# Machine-readable output.
+cargo run -p ctx-cli -- status --json
+
 # Exercise switching in both directions.
-cargo run -p ctx-cli -- switch smoke-chat
+cargo run -p ctx-cli -- switch research
 cargo run -p ctx-cli -- status
-cargo run -p ctx-cli -- switch smoke-code
+cargo run -p ctx-cli -- switch coding
 cargo run -p ctx-cli -- status
 ```
 
 Expected behavior:
 
-1. Switching to `smoke-chat` minimizes the saved VS Code window and restores ChatGPT.
-2. Switching to `smoke-code` minimizes ChatGPT and restores/activates VS Code.
+1. Switching to `research` minimizes the saved coding windows and restores the research windows.
+2. Switching to `coding` minimizes the research windows and restores/activates the coding windows.
 3. `ctx status` reports the most recently selected workspace as active.
 4. Windows not assigned to either smoke workspace are left untouched.

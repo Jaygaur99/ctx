@@ -18,6 +18,9 @@ pub enum ConfigError {
     #[error("workspace '{name}' already exists")]
     WorkspaceAlreadyExists { name: String },
 
+    #[error("workspace '{name}' does not exist")]
+    WorkspaceMissing { name: String },
+
     #[error("config already exists at {path}")]
     AlreadyExists { path: PathBuf },
 
@@ -69,6 +72,10 @@ pub enum ConfigError {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub version: u32,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignored_windows: Vec<WindowInfo>,
+
     pub workspaces: BTreeMap<String, Workspace>,
 }
 
@@ -215,6 +222,14 @@ impl Config {
         Ok(())
     }
 
+    pub fn remove_workspace(&mut self, name: &str) -> Result<Workspace, ConfigError> {
+        self.workspaces
+            .remove(name)
+            .ok_or_else(|| ConfigError::WorkspaceMissing {
+                name: name.to_string(),
+            })
+    }
+
     pub fn from_yaml(yaml: &str) -> Result<Self, serde_yaml::Error> {
         serde_yaml::from_str(yaml)
     }
@@ -251,6 +266,7 @@ workspaces:
         let workspace = config.workspace("devlayout").unwrap();
 
         assert_eq!(config.version, 1);
+        assert!(config.ignored_windows.is_empty());
         assert_eq!(
             workspace.path,
             Some(PathBuf::from("/Users/jay/git-work/devLayout"))
@@ -275,6 +291,26 @@ workspaces:
 
         assert!(workspace.services.is_empty());
         assert!(workspace.urls.is_empty());
+        assert!(config.ignored_windows.is_empty());
+    }
+
+    #[test]
+    fn parses_ignored_windows() {
+        let config = Config::from_yaml(
+            r#"
+version: 1
+ignored_windows:
+  - id: 42
+    pid: 7
+    owner: AltTab
+    title: AltTab Pro
+workspaces: {}
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.ignored_windows.len(), 1);
+        assert_eq!(config.ignored_windows[0].id, 42);
     }
 
     #[test]
@@ -396,5 +432,15 @@ workspaces: {}
         let error = config.add_workspace("coding", Vec::new()).unwrap_err();
 
         assert!(matches!(error, ConfigError::WorkspaceAlreadyExists { .. }));
+    }
+
+    #[test]
+    fn removes_workspace() {
+        let mut config = Config::from_yaml("version: 1\nworkspaces: {}\n").unwrap();
+        config.add_workspace("coding", Vec::new()).unwrap();
+
+        config.remove_workspace("coding").unwrap();
+
+        assert!(config.workspace("coding").is_none());
     }
 }
