@@ -62,6 +62,17 @@ pub enum RecoveryKind {
     Generic,
 }
 
+impl RecoveryKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Editor => "editor",
+            Self::Terminal => "terminal",
+            Self::Browser => "browser",
+            Self::Generic => "generic",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalTabState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -102,6 +113,9 @@ pub struct WindowStatus {
     pub owner: String,
     pub title: Option<String>,
     pub state: WindowState,
+    pub recovery_kind: Option<RecoveryKind>,
+    pub recovery_ready: bool,
+    pub recovery_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -386,38 +400,59 @@ pub fn inspect_windows(
 ) -> Vec<WindowStatus> {
     saved_windows
         .iter()
-        .map(|saved| match resolve_window(saved, all_windows) {
-            WindowResolution::Resolved(current) => WindowStatus {
-                saved_id: saved.id,
-                resolved_id: Some(current.id),
-                pid: Some(current.pid),
-                owner: current.owner,
-                title: current.title,
-                state: if visible_windows
-                    .iter()
-                    .any(|visible| visible.id == current.id)
-                {
-                    WindowState::Visible
-                } else {
-                    WindowState::Minimized
+        .map(|saved| {
+            let recovery_kind = saved.recovery.as_ref().map(RecoveryState::kind);
+            let recovery_ready = match saved.recovery.as_ref() {
+                Some(RecoveryState::Generic) => {
+                    saved.bundle_id.is_some() || saved.application_path.is_some()
+                }
+                Some(_) => saved.bundle_id.is_some(),
+                None => false,
+            };
+            let recovery_warning = saved.recovery_warning.clone();
+
+            match resolve_window(saved, all_windows) {
+                WindowResolution::Resolved(current) => WindowStatus {
+                    saved_id: saved.id,
+                    resolved_id: Some(current.id),
+                    pid: Some(current.pid),
+                    owner: current.owner,
+                    title: current.title,
+                    state: if visible_windows
+                        .iter()
+                        .any(|visible| visible.id == current.id)
+                    {
+                        WindowState::Visible
+                    } else {
+                        WindowState::Minimized
+                    },
+                    recovery_kind,
+                    recovery_ready,
+                    recovery_warning,
                 },
-            },
-            WindowResolution::Ambiguous(_) => WindowStatus {
-                saved_id: saved.id,
-                resolved_id: None,
-                pid: None,
-                owner: saved.owner.clone(),
-                title: saved.title.clone(),
-                state: WindowState::Ambiguous,
-            },
-            WindowResolution::Missing => WindowStatus {
-                saved_id: saved.id,
-                resolved_id: None,
-                pid: None,
-                owner: saved.owner.clone(),
-                title: saved.title.clone(),
-                state: WindowState::Missing,
-            },
+                WindowResolution::Ambiguous(_) => WindowStatus {
+                    saved_id: saved.id,
+                    resolved_id: None,
+                    pid: None,
+                    owner: saved.owner.clone(),
+                    title: saved.title.clone(),
+                    state: WindowState::Ambiguous,
+                    recovery_kind,
+                    recovery_ready,
+                    recovery_warning,
+                },
+                WindowResolution::Missing => WindowStatus {
+                    saved_id: saved.id,
+                    resolved_id: None,
+                    pid: None,
+                    owner: saved.owner.clone(),
+                    title: saved.title.clone(),
+                    state: WindowState::Missing,
+                    recovery_kind,
+                    recovery_ready,
+                    recovery_warning,
+                },
+            }
         })
         .collect()
 }
@@ -570,6 +605,30 @@ mod tests {
             saved.recovery_warning.as_deref(),
             Some("captured with fallback")
         );
+    }
+
+    #[test]
+    fn inspection_reports_recovery_readiness_and_warning() {
+        let mut saved = window(1, "Code", "project", 10);
+        saved.bundle_id = Some("com.microsoft.VSCode".to_string());
+        saved.recovery = Some(RecoveryState::Editor {
+            project_path: PathBuf::from("/tmp/project"),
+        });
+        saved.recovery_warning = Some("captured from document metadata".to_string());
+
+        let status = inspect_windows(std::slice::from_ref(&saved), &[], &[])
+            .pop()
+            .unwrap();
+
+        assert_eq!(status.recovery_kind, Some(RecoveryKind::Editor));
+        assert!(status.recovery_ready);
+        assert_eq!(
+            status.recovery_warning.as_deref(),
+            Some("captured from document metadata")
+        );
+        let json = serde_json::to_value(status).unwrap();
+        assert_eq!(json["recovery_kind"], "editor");
+        assert_eq!(json["recovery_ready"], true);
     }
 }
 

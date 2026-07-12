@@ -9,7 +9,7 @@ use ctx_core::{
     AppPaths, Config, GenericAppAdapter, RuntimeState, WindowInfo, WindowResolution, WindowState,
     WindowStatus, close_windows, default_recovery_registry, inspect_windows, list_all_windows,
     list_windows, minimize_windows_best_effort, reconcile_windows, resolve_window,
-    snapshot_workspace, switch_workspace,
+    save_switch_transaction, snapshot_workspace, switch_workspace,
 };
 use error::CliError;
 use serde_json::{Value, json};
@@ -364,8 +364,7 @@ fn switch_to_workspace(
     let mut state = RuntimeState::load(&app_paths.runtime_file)?;
 
     switch_workspace(&mut config, &mut state, &name)?;
-    config.save(&config_path)?;
-    state.save(app_paths.runtime_file)?;
+    save_switch_transaction(&config, &config_path, &state, app_paths.runtime_file)?;
 
     if json_output {
         print_json(json!({ "active_workspace": name }))?;
@@ -576,15 +575,27 @@ fn ensure_windows_resolved(workspace: &str, statuses: &[WindowStatus]) -> Result
 fn print_window_statuses(statuses: &[WindowStatus]) {
     for status in statuses {
         println!(
-            "    {:<10} {:<10} {:<24} {}",
+            "    {:<10} {:<10} {:<12} {:<24} {}",
             status
                 .resolved_id
                 .map(|id| id.to_string())
                 .unwrap_or_else(|| status.saved_id.to_string()),
             window_state_label(status.state),
+            recovery_label(status),
             status.owner,
             status.title.as_deref().unwrap_or("<untitled>")
         );
+        if let Some(warning) = &status.recovery_warning {
+            println!("      recovery warning: {warning}");
+        }
+    }
+}
+
+fn recovery_label(status: &WindowStatus) -> String {
+    match (status.recovery_kind, status.recovery_ready) {
+        (Some(kind), true) => kind.as_str().to_string(),
+        (Some(kind), false) => format!("{}:not-ready", kind.as_str()),
+        (None, _) => "none".to_string(),
     }
 }
 

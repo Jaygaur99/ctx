@@ -1,6 +1,6 @@
 use ctx_core::{
     AccessibilityError, ConfigError, PathsError, RecoveryError, RuntimeError, SwitchError,
-    WindowError, WindowState,
+    SwitchPersistenceError, WindowError, WindowState,
 };
 use thiserror::Error;
 
@@ -26,6 +26,9 @@ pub enum CliError {
 
     #[error(transparent)]
     Switch(#[from] SwitchError),
+
+    #[error(transparent)]
+    SwitchPersistence(#[from] SwitchPersistenceError),
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),

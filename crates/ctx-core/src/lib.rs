@@ -1,6 +1,7 @@
 pub mod accessibility;
 pub mod config;
 pub mod paths;
+pub mod persistence;
 pub mod recovery;
 pub mod runtime;
 pub mod snapshot;
@@ -13,6 +14,7 @@ pub use accessibility::{
 };
 pub use config::{Config, ConfigError, Service, Workspace};
 pub use paths::{AppPaths, PathsError};
+pub use persistence::{SwitchPersistenceError, save_switch_transaction};
 pub use recovery::{
     AntigravityAdapter, AntigravityPlatform, FirefoxAdapter, FirefoxPlatform, GenericAppAdapter,
     RecoveryAdapter, RecoveryError, RecoveryRegistry, SystemAntigravityPlatform,
