@@ -18,6 +18,9 @@ pub enum ConfigError {
     #[error("workspace '{name}' already exists")]
     WorkspaceAlreadyExists { name: String },
 
+    #[error("workspace '{name}' does not exist")]
+    WorkspaceMissing { name: String },
+
     #[error("config already exists at {path}")]
     AlreadyExists { path: PathBuf },
 
@@ -215,6 +218,14 @@ impl Config {
         Ok(())
     }
 
+    pub fn remove_workspace(&mut self, name: &str) -> Result<Workspace, ConfigError> {
+        self.workspaces
+            .remove(name)
+            .ok_or_else(|| ConfigError::WorkspaceMissing {
+                name: name.to_string(),
+            })
+    }
+
     pub fn from_yaml(yaml: &str) -> Result<Self, serde_yaml::Error> {
         serde_yaml::from_str(yaml)
     }
@@ -396,5 +407,15 @@ workspaces: {}
         let error = config.add_workspace("coding", Vec::new()).unwrap_err();
 
         assert!(matches!(error, ConfigError::WorkspaceAlreadyExists { .. }));
+    }
+
+    #[test]
+    fn removes_workspace() {
+        let mut config = Config::from_yaml("version: 1\nworkspaces: {}\n").unwrap();
+        config.add_workspace("coding", Vec::new()).unwrap();
+
+        config.remove_workspace("coding").unwrap();
+
+        assert!(config.workspace("coding").is_none());
     }
 }
