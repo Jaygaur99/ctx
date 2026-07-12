@@ -1,68 +1,103 @@
 # Ctx Canary: Rust CLI Context Switcher
 
-## Summary
+## Goal
 
-Build a macOS-only Rust CLI proving one workflow:
+Build a local-first, macOS-only Rust CLI that groups existing application windows into workspaces and switches between them by minimizing the active workspace and restoring the target workspace.
 
-`ctx switch <name>` stops the current workspace's services, minimizes its tracked VS Code and Chrome windows, restores or opens the target workspace, and starts its services.
+Tauri, Git automation, brain-state notes, macOS Spaces, and public distribution are outside the canary.
 
-No Tauri, Git automation, notes, macOS Spaces, or public npm release.
+## Completed
 
-## Implementation
+- [x] Create the Cargo workspace with `ctx-core` and `ctx-cli`.
+- [x] Add the Clap commands `init`, `list`, `listAll`, `add`, `switch`, `status`, and the `close` placeholder.
+- [x] Resolve standard macOS config, data, and log paths.
+- [x] Create and validate `workspaces.yaml` with typed errors.
+- [x] List visible windows with Core Graphics.
+- [x] List minimized/off-screen windows across all macOS Desktops with `listAll`.
+- [x] Save selected window IDs, PIDs, owners, titles, and geometry with `ctx add`.
+- [x] Detect and request macOS Accessibility permission.
+- [x] Resolve saved windows to Accessibility elements using title and geometry fingerprints.
+- [x] Support Electron applications such as VS Code by activating them before restore.
+- [x] Minimize and restore individual windows without hiding or quitting the owning application.
+- [x] Persist the active workspace atomically in `runtime.json`.
+- [x] Implement `ctx switch <name>` with an attempt to restore the previous workspace if target activation fails.
+- [x] Report the active workspace through `ctx status`.
+- [x] Verify a real two-way switch between ChatGPT and VS Code.
+- [x] Pass all workspace tests and strict Clippy checks.
 
-- Create a Cargo workspace with `ctx-core` and `ctx-cli`; a future Tauri backend can reuse `ctx-core`.
-- Use `clap`, `serde`, `serde_yaml`, `serde_json`, `thiserror`, and `directories`.
-- Use Rust process groups for background services, redirect output to per-service logs, and stop groups with `SIGTERM`, followed by `SIGKILL` after five seconds.
-- Use macOS Accessibility through Rust `AXUIElement` bindings to discover, minimize, restore, raise, and close windows. Accessibility permission is required.
-- Add only two application adapters:
-  - VS Code: open with `code --new-window <path>` and track the resulting window.
-  - Chrome: create a dedicated window for configured URLs and retain its Chrome window ID.
-- Never quit VS Code or Chrome; operate only on windows created and tracked by Ctx.
-- Persist settings under `~/Library/Application Support/Ctx/config/`, runtime state under `data/`, and logs under `~/Library/Logs/Ctx/`.
-- Begin with an automation spike that must successfully open, identify, minimize, restore, and close exact VS Code and Chrome windows before building the complete lifecycle.
+Completed checkpoint commits:
 
-## Interfaces
+- `cec8a49 feat: add accessibility window controls`
+- `eb3fbc0 feat: persist active workspace state`
+- `4d2ac5a feat: implement workspace switching`
 
-```yaml
-version: 1
+## Remaining CLI Work
 
-workspaces:
-  devlayout:
-    path: /Users/jay/git-work/devLayout
-    services:
-      - name: web
-        run: pnpm dev
-      - name: containers
-        start: docker compose up -d
-        stop: docker compose down
-    urls:
-      - https://github.com/example/project/pulls
-      - http://localhost:3000
+- [ ] Reconcile stale Core Graphics IDs after an application or window restarts.
+- [ ] Report each saved window as visible, minimized, ambiguous, or missing in `ctx status`.
+- [ ] Implement `ctx close [name]` for exact tracked windows without quitting unrelated windows.
+- [ ] Add `ctx show <name>` to inspect one workspace.
+- [ ] Add `ctx remove <name>` to delete a workspace and clean stale runtime state.
+- [ ] Improve `list` and `listAll` with application/PID filters and assigned-workspace markers.
+- [ ] Replace boxed CLI errors with structured error types and consistent exit codes.
+- [ ] Add optional machine-readable output for future Tauri integration.
+
+## Deferred Service Work
+
+- [ ] Launch `run` services through `/bin/zsh -lc` in isolated process groups.
+- [ ] Redirect service output to per-workspace log files.
+- [ ] Stop process groups with `SIGTERM`, then `SIGKILL` after a timeout.
+- [ ] Support paired `start`/`stop` commands such as Docker Compose.
+- [ ] Persist PID/PGID service state and reconcile stale processes.
+- [ ] Integrate service stop/start and rollback into `ctx switch`.
+- [ ] Add `ctx logs <workspace> [service]`.
+
+## Deferred Recovery and Product Work
+
+- [ ] Add a VS Code adapter that recreates missing project windows with `code --new-window`.
+- [ ] Add a Chrome adapter that recreates missing URL windows.
+- [ ] Add permission-gated macOS integration tests for minimize, restore, switch, and close.
+- [ ] Add process lifecycle integration tests.
+- [ ] Document installation, Accessibility setup, usage, and current limitations.
+- [ ] Run final acceptance testing without leaving temporary workspace definitions behind.
+
+## Current Configuration
+
+Persistent files:
+
+- Config: `~/Library/Application Support/Ctx/config/workspaces.yaml`
+- Runtime: `~/Library/Application Support/Ctx/data/runtime.json`
+- Logs: `~/Library/Logs/Ctx/`
+
+Current smoke workspaces:
+
+- `smoke-chat` tracks the ChatGPT window.
+- `smoke-code` tracks the VS Code window.
+
+Core Graphics window IDs are live-session identifiers. The current canary expects tracked windows to remain open; restarting an application can make its saved ID stale.
+
+## Manual Smoke Test
+
+```bash
+# Inspect configured workspaces and active state.
+cargo run -p ctx-cli -- status
+
+# Show currently visible selectable windows.
+cargo run -p ctx-cli -- list
+
+# Show windows across all Desktops, including minimized windows.
+cargo run -p ctx-cli -- listAll
+
+# Exercise switching in both directions.
+cargo run -p ctx-cli -- switch smoke-chat
+cargo run -p ctx-cli -- status
+cargo run -p ctx-cli -- switch smoke-code
+cargo run -p ctx-cli -- status
 ```
 
-- `run` defines a long-running process-group service.
-- `start` plus `stop` defines a command-managed service such as Docker Compose.
-- Commands execute through `/bin/zsh -lc` with the workspace path as the working directory.
-- `ctx switch <name>` validates the target, deactivates the current workspace, then activates the target. On activation failure, clean up the partial target and restore the previous workspace.
-- `ctx status` reconciles stored PIDs and windows with current system state.
-- `ctx close [name]` stops services and closes tracked windows.
-- State writes are atomic so interrupted switches remain recoverable.
+Expected behavior:
 
-## Test Plan
-
-- Unit-test YAML validation, state transitions, atomic persistence, and rollback.
-- Integration-test process-group start/stop and paired lifecycle commands.
-- Add a permission-gated macOS test for exact VS Code and Chrome window control.
-- Run an acceptance test with two workspaces:
-  - Switching A to B stops A's services and minimizes only A's windows.
-  - B's services and windows become active.
-  - Switching B to A restores A rather than creating duplicates.
-  - Closing A leaves unrelated VS Code and Chrome windows untouched.
-
-## Assumptions
-
-- Personal macOS dogfood only; `ctx` remains a local working command name.
-- One workspace is active at a time.
-- VS Code's `code` command and Google Chrome are installed.
-- Configuration is manually edited for the canary.
-- Git, brain-state notes, Tauri UI, generic apps, publishing, and real macOS Desktop/Space control are deferred.
+1. Switching to `smoke-chat` minimizes the saved VS Code window and restores ChatGPT.
+2. Switching to `smoke-code` minimizes ChatGPT and restores/activates VS Code.
+3. `ctx status` reports the most recently selected workspace as active.
+4. Windows not assigned to either smoke workspace are left untouched.
