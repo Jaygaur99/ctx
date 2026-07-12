@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/ctx-core",
+    "crates/ctx-cli",
+]
+resolver = "2"
