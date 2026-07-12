@@ -250,60 +250,70 @@ pub(crate) fn accessibility_window(
     }
     thread::sleep(Duration::from_millis(250));
 
-    let mut windows = application
-        .windows()
-        .map_err(|source| AccessibilityError::Operation {
-            id: current.id,
-            source,
-        })?;
-    if windows.is_empty() {
-        windows = application
-            .children()
-            .map_err(|source| AccessibilityError::Operation {
-                id: current.id,
-                source,
-            })?;
-    }
+    let attempts = if activate_application { 3 } else { 1 };
+    let mut attempt = 0;
+    let last_windows = loop {
+        let mut windows =
+            application
+                .windows()
+                .map_err(|source| AccessibilityError::Operation {
+                    id: current.id,
+                    source,
+                })?;
+        if windows.is_empty() {
+            windows = application
+                .children()
+                .map_err(|source| AccessibilityError::Operation {
+                    id: current.id,
+                    source,
+                })?;
+        }
 
-    let matches: Vec<_> = windows
+        let matches: Vec<_> = windows
+            .iter()
+            .filter(|window| {
+                let title_matches = current.title.is_some()
+                    && window_title(window).as_deref() == current.title.as_deref();
+                let bounds_match = current
+                    .bounds
+                    .zip(window_bounds(window))
+                    .is_some_and(|(expected, actual)| expected.is_close_to(actual));
+
+                title_matches || bounds_match
+            })
+            .collect();
+
+        if matches.len() > 1 {
+            return Err(AccessibilityError::WindowAmbiguous { id: current.id });
+        }
+        if let Some(window) = matches.first() {
+            return Ok((**window).clone());
+        }
+
+        attempt += 1;
+        if attempt >= attempts {
+            break windows;
+        }
+        activate_running_application(current.pid);
+        thread::sleep(Duration::from_millis(500));
+    };
+
+    let candidates = last_windows
         .iter()
-        .filter(|window| {
-            let title_matches = current.title.is_some()
-                && window_title(window).as_deref() == current.title.as_deref();
-            let bounds_match = current
-                .bounds
-                .zip(window_bounds(window))
-                .is_some_and(|(expected, actual)| expected.is_close_to(actual));
-
-            title_matches || bounds_match
+        .map(|window| {
+            format!(
+                "title={:?} bounds={:?}",
+                window_title(&window),
+                window_bounds(&window)
+            )
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .join(", ");
 
-    if matches.len() > 1 {
-        return Err(AccessibilityError::WindowAmbiguous { id: current.id });
-    }
-
-    matches
-        .first()
-        .map(|window| (**window).clone())
-        .ok_or_else(|| {
-            let candidates = windows
-                .iter()
-                .map(|window| {
-                    format!(
-                        "title={:?} bounds={:?}",
-                        window_title(&window),
-                        window_bounds(&window)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            AccessibilityError::WindowUnresolved {
-                id: current.id,
-                candidates,
-            }
-        })
+    Err(AccessibilityError::WindowUnresolved {
+        id: current.id,
+        candidates,
+    })
 }
 
 #[cfg(target_os = "macos")]

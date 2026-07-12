@@ -167,9 +167,12 @@ fn capture_firefox_tabs(
         .iter()
         .filter(|element| {
             element.role().is_ok_and(|role| role == "AXRadioButton")
-                && element
-                    .description()
-                    .is_ok_and(|description| description == "tab")
+                && (element
+                    .subrole()
+                    .is_ok_and(|subrole| subrole == "AXTabButton")
+                    || element
+                        .description()
+                        .is_ok_and(|description| description == "tab"))
         })
         .cloned()
         .collect();
@@ -230,9 +233,12 @@ fn select_firefox_tab(
         .into_iter()
         .filter(|element| {
             element.role().is_ok_and(|role| role == "AXRadioButton")
-                && element
-                    .description()
-                    .is_ok_and(|description| description == "tab")
+                && (element
+                    .subrole()
+                    .is_ok_and(|subrole| subrole == "AXTabButton")
+                    || element
+                        .description()
+                        .is_ok_and(|description| description == "tab"))
         })
         .collect();
     let tab = tabs
