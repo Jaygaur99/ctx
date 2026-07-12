@@ -246,10 +246,22 @@ impl RecoveryAdapter for VsCodeAdapter {
             return false;
         };
 
-        self.platform
-            .project_path(candidate)
-            .is_ok_and(|candidate_path| candidate_path == *project_path)
+        vscode_title_matches_project(candidate.title.as_deref(), project_path)
     }
+}
+
+fn vscode_title_matches_project(title: Option<&str>, project_path: &Path) -> bool {
+    let label =
+        if project_path.extension().and_then(|value| value.to_str()) == Some("code-workspace") {
+            project_path.file_stem()
+        } else {
+            project_path.file_name()
+        }
+        .and_then(|value| value.to_str());
+
+    label.is_some_and(|label| {
+        title.is_some_and(|title| title.split('—').any(|segment| segment.trim() == label))
+    })
 }
 
 pub struct AntigravityAdapter {
@@ -403,6 +415,9 @@ mod tests {
             [PathBuf::from("/tmp/devLayout")]
         );
         assert!(adapter.matches(&saved, &window(99, "COM.MICROSOFT.VSCODE")));
+        let mut welcome = window(100, "com.microsoft.VSCode");
+        welcome.title = Some("Welcome".to_string());
+        assert!(!adapter.matches(&saved, &welcome));
     }
 
     #[test]
@@ -461,6 +476,21 @@ mod tests {
             vscode_workspace_path_from_storage(&current, &storage),
             Some(PathBuf::from("/tmp/expected"))
         );
+    }
+
+    #[test]
+    fn matches_loaded_vscode_folder_title_but_not_welcome() {
+        let project_path = Path::new("/Users/jay/git-work/devLayout");
+
+        assert!(vscode_title_matches_project(
+            Some("terminal.rs — devLayout"),
+            project_path
+        ));
+        assert!(vscode_title_matches_project(
+            Some("browser.rs — devLayout — Modified"),
+            project_path
+        ));
+        assert!(!vscode_title_matches_project(Some("Welcome"), project_path));
     }
 
     #[test]

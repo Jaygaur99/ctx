@@ -275,7 +275,7 @@ fn poll_for_recovered_windows(
                 .filter(|candidate| adapter.matches(saved, candidate))
                 .cloned()
                 .collect();
-            if matches.is_empty() {
+            if matches.is_empty() && matches!(recovery, RecoveryState::Generic) {
                 matches = latest
                     .iter()
                     .filter(|candidate| !used_ids.contains(&candidate.id))
@@ -650,6 +650,41 @@ mod tests {
         assert_eq!(recovered.id, 99);
         assert_eq!(recovered.title.as_deref(), Some("New Title"));
         assert_eq!(state.active_workspace.as_deref(), Some("target"));
+    }
+
+    #[test]
+    fn app_specific_recovery_waits_for_adapter_match() {
+        let mut saved = window(2, "target.app", "Expected", false);
+        saved.recovery = Some(RecoveryState::Editor {
+            project_path: PathBuf::from("/tmp/project"),
+        });
+        let welcome = window(20, "target.app", "Welcome", false);
+        let recovered = window(99, "target.app", "Expected", false);
+        let adapter = Arc::new(FakeAdapter::default());
+        let mut registry = RecoveryRegistry::new();
+        registry.register("target.app", adapter.clone());
+        let mut platform = FakePlatform::new(vec![
+            Vec::new(),
+            vec![welcome.clone()],
+            vec![welcome, recovered],
+        ]);
+        let mut config = config(Vec::new(), vec![saved]);
+        let mut state = RuntimeState::default();
+
+        switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &registry,
+            &FakeAdapter::default(),
+            &mut platform,
+        )
+        .unwrap();
+
+        let recovered = &config.workspace("target").unwrap().windows[0];
+        assert_eq!(recovered.id, 99);
+        assert_eq!(recovered.title.as_deref(), Some("Expected"));
+        assert_eq!(*adapter.launches.lock().unwrap(), [2]);
     }
 
     #[test]
