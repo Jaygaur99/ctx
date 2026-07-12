@@ -4,7 +4,9 @@ use std::{collections::BTreeMap, error::Error, io, path::PathBuf, process::ExitC
 
 use clap::Parser;
 use cli::{Cli, Commands};
-use ctx_core::{AppPaths, Config, WindowInfo, list_all_windows, list_windows};
+use ctx_core::{
+    AppPaths, Config, RuntimeState, WindowInfo, list_all_windows, list_windows, switch_workspace,
+};
 
 fn main() -> ExitCode {
     match run() {
@@ -29,7 +31,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             add_workspace(cli.config, name, window_ids)?;
         }
         Commands::Switch { name } => {
-            println!("Switching to workspace: {name}");
+            switch_to_workspace(cli.config, name)?;
         }
         Commands::Status => {
             show_status(cli.config)?;
@@ -90,6 +92,23 @@ fn add_workspace(
     Ok(())
 }
 
+fn switch_to_workspace(
+    config_override: Option<PathBuf>,
+    name: String,
+) -> Result<(), Box<dyn Error>> {
+    let app_paths = AppPaths::discover()?;
+    let config_path = config_override.unwrap_or(app_paths.config_file);
+    let config = Config::load(config_path)?;
+    let mut state = RuntimeState::load(&app_paths.runtime_file)?;
+
+    switch_workspace(&config, &mut state, &name)?;
+    state.save(app_paths.runtime_file)?;
+
+    println!("Switched to workspace '{name}'");
+
+    Ok(())
+}
+
 fn init_config(config_override: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
     let config_path = resolve_config_path(config_override)?;
 
@@ -100,10 +119,16 @@ fn init_config(config_override: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
 }
 
 fn show_status(config_override: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
-    let config_path = resolve_config_path(config_override)?;
+    let app_paths = AppPaths::discover()?;
+    let config_path = config_override.unwrap_or(app_paths.config_file);
     let config = Config::load(&config_path)?;
+    let state = RuntimeState::load(app_paths.runtime_file)?;
 
     println!("Config: {}", config_path.display());
+    println!(
+        "Active: {}",
+        state.active_workspace.as_deref().unwrap_or("<none>")
+    );
     println!("Workspaces: {}", config.workspaces.len());
 
     for name in config.workspaces.keys() {
