@@ -18,6 +18,23 @@ pub enum Commands {
     /// Create an empty workspace configuration
     Init,
 
+    /// List visible windows that can be added to a workspace
+    List,
+
+    /// List windows across all macOS Desktops, including minimized windows
+    #[command(name = "listAll", visible_alias = "list-all")]
+    ListAll,
+
+    /// Create a workspace from visible window IDs
+    Add {
+        /// Name for the new workspace
+        name: String,
+
+        /// Window IDs shown by `ctx list`
+        #[arg(required = true, num_args = 1..)]
+        window_ids: Vec<u32>,
+    },
+
     /// Switch to another workspace
     Switch {
         /// Name of the workspace
@@ -55,6 +72,35 @@ mod tests {
         let cli = Cli::try_parse_from(["ctx", "init"]).unwrap();
 
         assert_eq!(cli.command, Commands::Init);
+    }
+
+    #[test]
+    fn parses_add_command() {
+        let cli = Cli::try_parse_from(["ctx", "add", "backend", "42", "57"]).unwrap();
+
+        assert_eq!(
+            cli.command,
+            Commands::Add {
+                name: "backend".to_string(),
+                window_ids: vec![42, 57],
+            }
+        );
+    }
+
+    #[test]
+    fn parses_list_all_command_and_alias() {
+        let camel_case = Cli::try_parse_from(["ctx", "listAll"]).unwrap();
+        let kebab_case = Cli::try_parse_from(["ctx", "list-all"]).unwrap();
+
+        assert_eq!(camel_case.command, Commands::ListAll);
+        assert_eq!(kebab_case.command, Commands::ListAll);
+    }
+
+    #[test]
+    fn add_requires_at_least_one_window() {
+        let result = Cli::try_parse_from(["ctx", "add", "backend"]);
+
+        assert!(result.is_err());
     }
 
     #[test]

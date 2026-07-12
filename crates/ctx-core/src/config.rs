@@ -5,11 +5,19 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::WindowInfo;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("workspace name cannot be empty")]
+    EmptyWorkspaceName,
+
+    #[error("workspace '{name}' already exists")]
+    WorkspaceAlreadyExists { name: String },
+
     #[error("config already exists at {path}")]
     AlreadyExists { path: PathBuf },
 
@@ -43,26 +51,43 @@ pub enum ConfigError {
 
     #[error("unsupported config version {found}; expected version 1")]
     UnsupportedVersion { found: u32 },
+
+    #[error("failed to serialize config: {source}")]
+    Serialize {
+        #[source]
+        source: serde_yaml::Error,
+    },
+
+    #[error("failed to write config at {path}: {source}")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub version: u32,
     pub workspaces: BTreeMap<String, Workspace>,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Workspace {
-    pub path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub services: Vec<Service>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub urls: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<WindowInfo>,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Service {
     Process {
@@ -144,6 +169,52 @@ impl Config {
         Ok(config)
     }
 
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
+        let path = path.as_ref();
+        let temporary_path = path.with_extension("yaml.tmp");
+        let yaml =
+            serde_yaml::to_string(self).map_err(|source| ConfigError::Serialize { source })?;
+
+        fs::write(&temporary_path, yaml).map_err(|source| ConfigError::Write {
+            path: temporary_path.clone(),
+            source,
+        })?;
+        fs::rename(&temporary_path, path).map_err(|source| ConfigError::Write {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        Ok(())
+    }
+
+    pub fn add_workspace(
+        &mut self,
+        name: impl Into<String>,
+        windows: Vec<WindowInfo>,
+    ) -> Result<(), ConfigError> {
+        let name = name.into();
+
+        if name.trim().is_empty() {
+            return Err(ConfigError::EmptyWorkspaceName);
+        }
+
+        if self.workspaces.contains_key(&name) {
+            return Err(ConfigError::WorkspaceAlreadyExists { name });
+        }
+
+        self.workspaces.insert(
+            name,
+            Workspace {
+                path: None,
+                services: Vec::new(),
+                urls: Vec::new(),
+                windows,
+            },
+        );
+
+        Ok(())
+    }
+
     pub fn from_yaml(yaml: &str) -> Result<Self, serde_yaml::Error> {
         serde_yaml::from_str(yaml)
     }
@@ -182,7 +253,7 @@ workspaces:
         assert_eq!(config.version, 1);
         assert_eq!(
             workspace.path,
-            PathBuf::from("/Users/jay/git-work/devLayout")
+            Some(PathBuf::from("/Users/jay/git-work/devLayout"))
         );
         assert_eq!(workspace.services.len(), 2);
         assert_eq!(workspace.urls, ["http://localhost:3000"]);
@@ -288,5 +359,41 @@ workspaces: {}
 
         assert!(matches!(error, ConfigError::AlreadyExists { .. }));
         assert_eq!(fs::read_to_string(path).unwrap(), YAML);
+    }
+
+    #[test]
+    fn saves_window_workspace_and_loads_it_again() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("workspaces.yaml");
+        let mut config = Config::from_yaml("version: 1\nworkspaces: {}\n").unwrap();
+
+        config
+            .add_workspace(
+                "coding",
+                vec![WindowInfo {
+                    id: 42,
+                    pid: 100,
+                    owner: "Visual Studio Code".to_string(),
+                    title: Some("devLayout".to_string()),
+                }],
+            )
+            .unwrap();
+        config.save(&path).unwrap();
+
+        let loaded = Config::load(path).unwrap();
+        let workspace = loaded.workspace("coding").unwrap();
+
+        assert_eq!(workspace.windows.len(), 1);
+        assert_eq!(workspace.windows[0].id, 42);
+    }
+
+    #[test]
+    fn refuses_duplicate_workspace_name() {
+        let mut config = Config::from_yaml("version: 1\nworkspaces: {}\n").unwrap();
+        config.add_workspace("coding", Vec::new()).unwrap();
+
+        let error = config.add_workspace("coding", Vec::new()).unwrap_err();
+
+        assert!(matches!(error, ConfigError::WorkspaceAlreadyExists { .. }));
     }
 }
