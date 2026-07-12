@@ -269,12 +269,20 @@ fn poll_for_recovered_windows(
             let recovery = saved.recovery.as_ref().expect("validated before launch");
             let adapter = recovery_adapter(saved, recovery, registry, generic)
                 .expect("validated before launch");
-            let matches: Vec<_> = latest
+            let mut matches: Vec<_> = latest
                 .iter()
                 .filter(|candidate| !used_ids.contains(&candidate.id))
                 .filter(|candidate| adapter.matches(saved, candidate))
                 .cloned()
                 .collect();
+            if matches.is_empty() {
+                matches = latest
+                    .iter()
+                    .filter(|candidate| !used_ids.contains(&candidate.id))
+                    .filter(|candidate| same_bundle_id(saved, candidate))
+                    .cloned()
+                    .collect();
+            }
             match matches.as_slice() {
                 [current] => {
                     used_ids.insert(current.id);
@@ -292,6 +300,14 @@ fn poll_for_recovered_windows(
         workspace: target_name.to_string(),
         ids: unresolved_ids,
     })
+}
+
+fn same_bundle_id(first: &WindowInfo, second: &WindowInfo) -> bool {
+    first
+        .bundle_id
+        .as_deref()
+        .zip(second.bundle_id.as_deref())
+        .is_some_and(|(first, second)| first.eq_ignore_ascii_case(second))
 }
 
 fn recovery_adapter<'a>(
@@ -608,6 +624,31 @@ mod tests {
         .unwrap();
 
         assert_eq!(*adapter.launches.lock().unwrap(), [2]);
+        assert_eq!(state.active_workspace.as_deref(), Some("target"));
+    }
+
+    #[test]
+    fn generic_recovery_accepts_a_unique_bundle_window_when_title_changes() {
+        let saved = window(2, "target.app", "Old Title", true);
+        let recovered = window(99, "target.app", "New Title", false);
+        let adapter = FakeAdapter::default();
+        let mut platform = FakePlatform::new(vec![Vec::new(), vec![recovered]]);
+        let mut config = config(Vec::new(), vec![saved]);
+        let mut state = RuntimeState::default();
+
+        switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &adapter,
+            &mut platform,
+        )
+        .unwrap();
+
+        let recovered = &config.workspace("target").unwrap().windows[0];
+        assert_eq!(recovered.id, 99);
+        assert_eq!(recovered.title.as_deref(), Some("New Title"));
         assert_eq!(state.active_workspace.as_deref(), Some("target"));
     }
 

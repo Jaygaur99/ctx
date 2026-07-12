@@ -592,10 +592,15 @@ fn print_window_statuses(statuses: &[WindowStatus]) {
 }
 
 fn recovery_label(status: &WindowStatus) -> String {
-    match (status.recovery_kind, status.recovery_ready) {
-        (Some(kind), true) => kind.as_str().to_string(),
-        (Some(kind), false) => format!("{}:not-ready", kind.as_str()),
-        (None, _) => "none".to_string(),
+    match (
+        status.recovery_kind,
+        status.recovery_ready,
+        status.recovery_degraded,
+    ) {
+        (Some(kind), true, true) => format!("{}:degraded", kind.as_str()),
+        (Some(kind), true, false) => kind.as_str().to_string(),
+        (Some(kind), false, _) => format!("{}:not-ready", kind.as_str()),
+        (None, _, _) => "none".to_string(),
     }
 }
 

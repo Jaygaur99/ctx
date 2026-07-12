@@ -128,73 +128,36 @@ fn normalize_bundle_id(bundle_id: &str) -> String {
 }
 
 #[cfg(target_os = "macos")]
-#[allow(deprecated, unexpected_cfgs)]
 fn launch_application(window: &WindowInfo) -> Result<(), RecoveryError> {
-    use cocoa::{
-        base::{id, nil},
-        foundation::{NSAutoreleasePool, NSString, NSURL},
-    };
-    use objc::{class, msg_send, sel, sel_impl};
+    use std::process::{Command, Stdio};
 
-    unsafe {
-        let pool = NSAutoreleasePool::new(nil);
-        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
-        let application_url: id = if let Some(path) = &window.application_path {
-            let path = path.to_string_lossy();
-            let path = NSString::alloc(nil).init_str(&path);
-            NSURL::fileURLWithPath_(nil, path)
-        } else if let Some(bundle_id) = &window.bundle_id {
-            let bundle_id = NSString::alloc(nil).init_str(bundle_id);
-            msg_send![workspace, URLForApplicationWithBundleIdentifier: bundle_id]
-        } else {
-            pool.drain();
-            return Err(RecoveryError::Restore(format!(
-                "{} has no bundle ID or application path",
-                window.owner
-            )));
-        };
-
-        if application_url == nil {
-            pool.drain();
-            return Err(RecoveryError::Restore(format!(
-                "macOS could not locate {}",
-                window.owner
-            )));
-        }
-
-        let mut error: id = nil;
-        let application: id = msg_send![
-            workspace,
-            launchApplicationAtURL: application_url
-            options: 0usize
-            configuration: nil
-            error: &mut error as *mut id
-        ];
-        if application == nil {
-            let description: id = if error == nil {
-                nil
-            } else {
-                msg_send![error, localizedDescription]
-            };
-            let message = if description == nil {
-                "unknown NSWorkspace error".to_string()
-            } else {
-                let bytes = description.UTF8String();
-                if bytes.is_null() {
-                    "unknown NSWorkspace error".to_string()
-                } else {
-                    std::ffi::CStr::from_ptr(bytes)
-                        .to_string_lossy()
-                        .into_owned()
-                }
-            };
-            pool.drain();
-            return Err(RecoveryError::Restore(message));
-        }
-
-        pool.drain();
-        Ok(())
+    let mut command = Command::new("/usr/bin/open");
+    if let Some(path) = &window.application_path {
+        command.arg("-a").arg(path);
+    } else if let Some(bundle_id) = &window.bundle_id {
+        command.arg("-b").arg(bundle_id);
+    } else {
+        return Err(RecoveryError::Restore(format!(
+            "{} has no bundle ID or application path",
+            window.owner
+        )));
     }
+    let output = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| {
+            RecoveryError::Restore(format!("could not reopen {}: {error}", window.owner))
+        })?;
+    if !output.status.success() {
+        return Err(RecoveryError::Restore(format!(
+            "macOS could not reopen {}: {}",
+            window.owner,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]

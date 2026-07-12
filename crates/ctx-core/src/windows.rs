@@ -115,6 +115,7 @@ pub struct WindowStatus {
     pub state: WindowState,
     pub recovery_kind: Option<RecoveryKind>,
     pub recovery_ready: bool,
+    pub recovery_degraded: bool,
     pub recovery_warning: Option<String>,
 }
 
@@ -410,6 +411,7 @@ pub fn inspect_windows(
                 None => false,
             };
             let recovery_warning = saved.recovery_warning.clone();
+            let recovery_degraded = recovery_warning.is_some();
 
             match resolve_window(saved, all_windows) {
                 WindowResolution::Resolved(current) => WindowStatus {
@@ -428,6 +430,7 @@ pub fn inspect_windows(
                     },
                     recovery_kind,
                     recovery_ready,
+                    recovery_degraded,
                     recovery_warning,
                 },
                 WindowResolution::Ambiguous(_) => WindowStatus {
@@ -439,6 +442,7 @@ pub fn inspect_windows(
                     state: WindowState::Ambiguous,
                     recovery_kind,
                     recovery_ready,
+                    recovery_degraded,
                     recovery_warning,
                 },
                 WindowResolution::Missing => WindowStatus {
@@ -450,6 +454,7 @@ pub fn inspect_windows(
                     state: WindowState::Missing,
                     recovery_kind,
                     recovery_ready,
+                    recovery_degraded,
                     recovery_warning,
                 },
             }
@@ -622,6 +627,7 @@ mod tests {
 
         assert_eq!(status.recovery_kind, Some(RecoveryKind::Editor));
         assert!(status.recovery_ready);
+        assert!(status.recovery_degraded);
         assert_eq!(
             status.recovery_warning.as_deref(),
             Some("captured from document metadata")
@@ -629,6 +635,7 @@ mod tests {
         let json = serde_json::to_value(status).unwrap();
         assert_eq!(json["recovery_kind"], "editor");
         assert_eq!(json["recovery_ready"], true);
+        assert_eq!(json["recovery_degraded"], true);
     }
 }
 

@@ -1,13 +1,13 @@
 use std::{
-    collections::{BTreeMap, hash_map::DefaultHasher},
-    fs,
-    hash::{Hash, Hasher},
-    path::PathBuf,
+    collections::BTreeMap,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Arc,
+    thread,
+    time::Duration,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::{RecoveryAdapter, RecoveryError, RecoveryState, TerminalTabState, WindowInfo};
 
@@ -21,7 +21,7 @@ pub trait WarpPlatform: Send + Sync {
         &self,
         window: &WindowInfo,
         tabs: &[TerminalTabState],
-        active_tab: Option<usize>,
+        _active_tab: Option<usize>,
     ) -> Result<(), RecoveryError>;
 }
 
@@ -63,7 +63,7 @@ impl WarpPlatform for SystemWarpPlatform {
         &self,
         _window: &WindowInfo,
         tabs: &[TerminalTabState],
-        active_tab: Option<usize>,
+        _active_tab: Option<usize>,
     ) -> Result<(), RecoveryError> {
         if tabs.is_empty() {
             return Err(RecoveryError::Restore(
@@ -74,47 +74,32 @@ impl WarpPlatform for SystemWarpPlatform {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .ok_or_else(|| RecoveryError::Restore("HOME is not set".to_string()))?;
-        let directory = home.join(".warp/launch_configurations");
-        fs::create_dir_all(&directory).map_err(|error| {
-            RecoveryError::Restore(format!(
-                "could not create Warp launch configuration directory {}: {error}",
-                directory.display()
-            ))
-        })?;
-
-        let config = WarpLaunchConfiguration::new(tabs, active_tab);
-        let yaml = serde_yaml::to_string(&config).map_err(|error| {
-            RecoveryError::Restore(format!("could not serialize Warp launch config: {error}"))
-        })?;
-        let path = directory.join(config.file_name());
-        let temporary = path.with_extension("yaml.tmp");
-        fs::write(&temporary, yaml).map_err(|error| {
-            RecoveryError::Restore(format!(
-                "could not write Warp launch config {}: {error}",
-                temporary.display()
-            ))
-        })?;
-        fs::rename(&temporary, &path).map_err(|error| {
-            RecoveryError::Restore(format!(
-                "could not install Warp launch config {}: {error}",
-                path.display()
-            ))
-        })?;
-
-        let uri = format!(
-            "warp://launch/{}",
-            encode_uri_component(&path.to_string_lossy())
-        );
-        Command::new("/usr/bin/open")
-            .arg(&uri)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| {
-                RecoveryError::Restore(format!("could not open Warp launch URI {uri}: {error}"))
-            })
+        for (index, tab) in tabs.iter().enumerate() {
+            let directory = tab.working_directory.as_deref().unwrap_or(&home);
+            let action = if index == 0 { "new_window" } else { "new_tab" };
+            let uri = warp_action_uri(action, directory);
+            let output = Command::new("/usr/bin/open")
+                .arg(&uri)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .output()
+                .map_err(|error| {
+                    RecoveryError::Restore(format!("could not open Warp URI {uri}: {error}"))
+                })?;
+            if !output.status.success() {
+                return Err(RecoveryError::Restore(format!(
+                    "Warp rejected URI {uri}: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )));
+            }
+            thread::sleep(if index == 0 {
+                Duration::from_millis(750)
+            } else {
+                Duration::from_millis(250)
+            });
+        }
+        Ok(())
     }
 }
 
@@ -275,61 +260,11 @@ fn same_bundle_id(first: &WindowInfo, second: &WindowInfo) -> bool {
         .is_some_and(|(first, second)| first.eq_ignore_ascii_case(second))
 }
 
-#[derive(Debug, Serialize)]
-struct WarpLaunchConfiguration {
-    name: String,
-    active_window_index: usize,
-    windows: Vec<WarpLaunchWindow>,
-}
-
-#[derive(Debug, Serialize)]
-struct WarpLaunchWindow {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    active_tab_index: Option<usize>,
-    tabs: Vec<WarpLaunchTab>,
-}
-
-#[derive(Debug, Serialize)]
-struct WarpLaunchTab {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    title: Option<String>,
-    layout: WarpLaunchLayout,
-}
-
-#[derive(Debug, Serialize)]
-struct WarpLaunchLayout {
-    cwd: PathBuf,
-}
-
-impl WarpLaunchConfiguration {
-    fn new(tabs: &[TerminalTabState], active_tab: Option<usize>) -> Self {
-        let mut hasher = DefaultHasher::new();
-        for tab in tabs {
-            tab.working_directory.hash(&mut hasher);
-            tab.title.hash(&mut hasher);
-        }
-        let hash = hasher.finish();
-        Self {
-            name: format!("Ctx Recovery {hash:016x}"),
-            active_window_index: 0,
-            windows: vec![WarpLaunchWindow {
-                active_tab_index: active_tab,
-                tabs: tabs
-                    .iter()
-                    .map(|tab| WarpLaunchTab {
-                        title: tab.title.clone(),
-                        layout: WarpLaunchLayout {
-                            cwd: tab.working_directory.clone().unwrap_or_default(),
-                        },
-                    })
-                    .collect(),
-            }],
-        }
-    }
-
-    fn file_name(&self) -> String {
-        format!("{}.yaml", self.name.to_lowercase().replace(' ', "-"))
-    }
+fn warp_action_uri(action: &str, path: &Path) -> String {
+    format!(
+        "warp://action/{action}?path={}",
+        encode_uri_component(&path.to_string_lossy())
+    )
 }
 
 fn encode_uri_component(value: &str) -> String {
@@ -435,14 +370,11 @@ mod tests {
     }
 
     #[test]
-    fn generated_launch_config_contains_no_commands() {
-        let config = WarpLaunchConfiguration::new(&tabs(), Some(1));
-        let yaml = serde_yaml::to_string(&config).unwrap();
-
-        assert!(yaml.contains("cwd: /tmp/api"));
-        assert!(yaml.contains("active_tab_index: 1"));
-        assert!(!yaml.contains("commands"));
-        assert!(!yaml.contains("exec"));
+    fn direct_warp_uri_encodes_working_directory_without_commands() {
+        assert_eq!(
+            warp_action_uri("new_window", Path::new("/tmp/api project")),
+            "warp://action/new_window?path=%2Ftmp%2Fapi%20project"
+        );
     }
 
     #[test]

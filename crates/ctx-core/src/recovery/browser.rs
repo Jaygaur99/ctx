@@ -164,17 +164,22 @@ fn capture_firefox_tabs(
     let accessibility_window = crate::accessibility::accessibility_window(window, true)?;
     let elements = descendants(&accessibility_window);
     let tabs: Vec<_> = elements
-        .into_iter()
+        .iter()
         .filter(|element| {
             element.role().is_ok_and(|role| role == "AXRadioButton")
                 && element
                     .description()
                     .is_ok_and(|description| description == "tab")
         })
+        .cloned()
         .collect();
     if tabs.is_empty() {
         return Err(crate::AccessibilityError::DocumentUnavailable { id: window.id });
     }
+    let address = elements
+        .iter()
+        .find(|element| is_firefox_address(element))
+        .cloned();
 
     let active_tab = tabs.iter().position(|tab| {
         tab.value()
@@ -195,7 +200,9 @@ fn capture_firefox_tabs(
             .ok()
             .map(|value| value.to_string())
             .filter(|value| !value.is_empty());
-        let url = firefox_address(&accessibility_window)
+        let url = address
+            .as_ref()
+            .and_then(firefox_address)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "about:newtab".to_string());
         captured.push(BrowserTabState { url, title });
@@ -249,7 +256,10 @@ fn descendants(
         depth: usize,
         output: &mut Vec<accessibility::ui_element::AXUIElement>,
     ) {
-        if depth >= 12 {
+        if depth >= 32 {
+            return;
+        }
+        if element.role().is_ok_and(|role| role == "AXWebArea") {
             return;
         }
         if let Ok(children) = element.children() {
@@ -266,20 +276,25 @@ fn descendants(
 }
 
 #[cfg(target_os = "macos")]
-fn firefox_address(root: &accessibility::ui_element::AXUIElement) -> Option<String> {
+fn is_firefox_address(element: &accessibility::ui_element::AXUIElement) -> bool {
+    use accessibility::attribute::AXUIElementAttributes;
+
+    element.role().is_ok_and(|role| role == "AXComboBox")
+        && element
+            .description()
+            .is_ok_and(|description| !description.to_string().is_empty())
+}
+
+#[cfg(target_os = "macos")]
+fn firefox_address(element: &accessibility::ui_element::AXUIElement) -> Option<String> {
     use accessibility::attribute::AXUIElementAttributes;
     use core_foundation::string::CFString;
 
-    descendants(root).into_iter().find_map(|element| {
-        let is_address = element.role().is_ok_and(|role| role == "AXComboBox")
-            && element
-                .description()
-                .is_ok_and(|description| !description.to_string().is_empty());
-        is_address
-            .then(|| element.value().ok()?.downcast::<CFString>())
-            .flatten()
-            .map(|value| value.to_string())
-    })
+    element
+        .value()
+        .ok()?
+        .downcast::<CFString>()
+        .map(|value| value.to_string())
 }
 
 #[cfg(not(target_os = "macos"))]

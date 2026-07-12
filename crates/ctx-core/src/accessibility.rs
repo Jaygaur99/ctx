@@ -405,7 +405,7 @@ pub(crate) fn window_document_path(
         return Err(AccessibilityError::PermissionRequired);
     }
 
-    let window = accessibility_window(current, false)?;
+    let window = accessibility_window(current, true)?;
     let attribute = AXAttribute::<CFType>::new(&CFString::from_static_string(kAXDocumentAttribute));
     let value = window
         .attribute(&attribute)
