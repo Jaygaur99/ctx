@@ -84,6 +84,21 @@ fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowErro
                 return None;
             }
 
+            let bounds = dictionary
+                .find(&bounds_key)
+                .and_then(|value| value.downcast::<CFDictionary>())
+                .and_then(|value| CGRect::from_dict_representation(&value))
+                .map(|bounds| WindowBounds {
+                    x: bounds.origin.x.round() as i32,
+                    y: bounds.origin.y.round() as i32,
+                    width: bounds.size.width.round() as i32,
+                    height: bounds.size.height.round() as i32,
+                })?;
+
+            if !bounds.is_manageable() {
+                return None;
+            }
+
             let id = dictionary
                 .find(&number_key)?
                 .downcast::<CFNumber>()?
@@ -102,29 +117,57 @@ fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowErro
                 .find(&title_key)
                 .and_then(|value| value.downcast::<CFString>())
                 .map(|value| value.to_string())
-                .filter(|value| !value.is_empty());
-            let bounds = dictionary
-                .find(&bounds_key)
-                .and_then(|value| value.downcast::<CFDictionary>())
-                .and_then(|value| CGRect::from_dict_representation(&value))
-                .map(|bounds| WindowBounds {
-                    x: bounds.origin.x.round() as i32,
-                    y: bounds.origin.y.round() as i32,
-                    width: bounds.size.width.round() as i32,
-                    height: bounds.size.height.round() as i32,
-                });
-
+                .filter(|value| !value.is_empty())?;
             Some(WindowInfo {
                 id,
                 pid,
                 owner,
-                title,
-                bounds,
+                title: Some(title),
+                bounds: Some(bounds),
             })
         })
         .collect();
 
     Ok(windows)
+}
+
+impl WindowBounds {
+    fn is_manageable(self) -> bool {
+        const MINIMUM_WINDOW_DIMENSION: i32 = 100;
+
+        self.width >= MINIMUM_WINDOW_DIMENSION && self.height >= MINIMUM_WINDOW_DIMENSION
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normal_window_bounds_are_manageable() {
+        assert!(
+            WindowBounds {
+                x: 0,
+                y: 33,
+                width: 1470,
+                height: 923,
+            }
+            .is_manageable()
+        );
+    }
+
+    #[test]
+    fn auxiliary_strips_are_not_manageable_windows() {
+        assert!(
+            !WindowBounds {
+                x: 0,
+                y: 33,
+                width: 1470,
+                height: 32,
+            }
+            .is_manageable()
+        );
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

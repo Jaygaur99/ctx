@@ -75,7 +75,7 @@ fn add_workspace(
         let window = available.get(&id).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("window {id} is not currently visible; run `ctx list` again"),
+                format!("window {id} is not currently selectable; run `ctx listAll` again"),
             )
         })?;
 

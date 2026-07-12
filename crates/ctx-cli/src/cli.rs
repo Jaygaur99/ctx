@@ -21,7 +21,7 @@ pub enum Commands {
     /// List visible windows that can be added to a workspace
     List,
 
-    /// List windows across all macOS Desktops, including minimized windows
+    /// List selectable windows across all macOS Desktops, including minimized windows
     #[command(name = "listAll", visible_alias = "list-all")]
     ListAll,
 
