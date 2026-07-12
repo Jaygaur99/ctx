@@ -47,6 +47,11 @@ pub enum WindowResolution {
 
 #[derive(Debug, Error)]
 pub enum WindowError {
+    #[error(
+        "Screen Recording permission is required to identify windows; enable your terminal app in System Settings > Privacy & Security > Screen & System Audio Recording, restart the terminal, then retry"
+    )]
+    ScreenRecordingPermissionRequired,
+
     #[error("macOS did not return a window list")]
     ListUnavailable,
 
@@ -79,11 +84,17 @@ fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowErro
         number::CFNumber,
         string::CFString,
     };
+    use core_graphics::access::ScreenCaptureAccess;
     use core_graphics::geometry::CGRect;
     use core_graphics::window::{
         copy_window_info, kCGNullWindowID, kCGWindowBounds, kCGWindowLayer, kCGWindowName,
         kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID,
     };
+
+    let screen_capture_access = ScreenCaptureAccess;
+    if !screen_capture_access.preflight() && !screen_capture_access.request() {
+        return Err(WindowError::ScreenRecordingPermissionRequired);
+    }
 
     let raw_windows =
         copy_window_info(options, kCGNullWindowID).ok_or(WindowError::ListUnavailable)?;

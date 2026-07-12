@@ -16,6 +16,7 @@ Tauri, Git automation, brain-state notes, macOS Spaces, and public distribution 
 - [x] List minimized/off-screen windows across all macOS Desktops with `listAll`.
 - [x] Save selected window IDs, PIDs, owners, titles, and geometry with `ctx add`.
 - [x] Detect and request macOS Accessibility permission.
+- [x] Detect and request macOS Screen Recording permission for window titles.
 - [x] Resolve saved windows to Accessibility elements using title and geometry fingerprints.
 - [x] Support Electron applications such as VS Code by activating them before restore.
 - [x] Minimize and restore individual windows without hiding or quitting the owning application.

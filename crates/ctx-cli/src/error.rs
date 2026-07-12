@@ -47,7 +47,8 @@ pub enum CliError {
 impl CliError {
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Accessibility(AccessibilityError::PermissionRequired)
+            Self::Window(WindowError::ScreenRecordingPermissionRequired)
+            | Self::Accessibility(AccessibilityError::PermissionRequired)
             | Self::Switch(SwitchError::Accessibility(AccessibilityError::PermissionRequired)) => 3,
             Self::WorkspaceMissing { .. }
             | Self::NoActiveWorkspace
@@ -58,5 +59,17 @@ impl CliError {
             | Self::Switch(SwitchError::WorkspaceMissing { .. }) => 2,
             _ => 1,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn screen_recording_permission_failure_uses_permission_exit_code() {
+        let error = CliError::Window(WindowError::ScreenRecordingPermissionRequired);
+
+        assert_eq!(error.exit_code(), 3);
     }
 }
