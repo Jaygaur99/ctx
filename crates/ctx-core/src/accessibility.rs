@@ -182,7 +182,13 @@ fn set_window_minimized(current: &WindowInfo, minimized: bool) -> Result<(), Acc
     use accessibility::{action::AXUIElementActions, attribute::AXAttribute};
     use core_foundation::boolean::CFBoolean;
 
-    let window = accessibility_window(current, !minimized)?;
+    let window = match accessibility_window(current, !minimized) {
+        Ok(window) => window,
+        Err(AccessibilityError::WindowUnresolved { .. }) if minimized => {
+            accessibility_window(current, true)?
+        }
+        Err(error) => return Err(error),
+    };
     window
         .set_attribute(
             &AXAttribute::minimized(),
@@ -214,7 +220,11 @@ fn accessibility_window(
     current: &WindowInfo,
     activate_application: bool,
 ) -> Result<accessibility::ui_element::AXUIElement, AccessibilityError> {
-    use std::{process::Command, thread, time::Duration};
+    use std::{
+        process::{Command, Stdio},
+        thread,
+        time::Duration,
+    };
 
     use accessibility::{
         attribute::{AXAttribute, AXUIElementAttributes},
@@ -229,6 +239,8 @@ fn accessibility_window(
     if activate_application {
         let _ = Command::new("/usr/bin/open")
             .args(["-a", &current.owner])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status();
         thread::sleep(Duration::from_millis(250));
     }
