@@ -6,7 +6,10 @@ use crate::{RecoveryState, WindowInfo};
 
 mod editor;
 
-pub use editor::{SystemVsCodePlatform, VsCodeAdapter, VsCodePlatform};
+pub use editor::{
+    AntigravityAdapter, AntigravityPlatform, SystemAntigravityPlatform, SystemVsCodePlatform,
+    VsCodeAdapter, VsCodePlatform,
+};
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum RecoveryError {
@@ -91,13 +94,17 @@ impl RecoveryRegistry {
 }
 
 pub fn default_recovery_registry() -> RecoveryRegistry {
-    let adapter: Arc<dyn RecoveryAdapter> = Arc::new(VsCodeAdapter::system());
     let mut registry = RecoveryRegistry::new();
+    let adapter: Arc<dyn RecoveryAdapter> = Arc::new(VsCodeAdapter::system());
     for bundle_id in [
         "com.microsoft.VSCode",
         "com.microsoft.VSCodeInsiders",
         "com.visualstudio.code.oss",
     ] {
+        registry.register(bundle_id, adapter.clone());
+    }
+    let adapter: Arc<dyn RecoveryAdapter> = Arc::new(AntigravityAdapter::system());
+    for bundle_id in ["com.google.antigravity", "com.google.antigravity-ide"] {
         registry.register(bundle_id, adapter.clone());
     }
     registry
@@ -290,5 +297,7 @@ mod tests {
                 .is_some()
         );
         assert!(registry.adapter_for("org.mozilla.firefox").is_none());
+        assert!(registry.adapter_for("com.google.antigravity").is_some());
+        assert!(registry.adapter_for("com.google.antigravity-ide").is_some());
     }
 }

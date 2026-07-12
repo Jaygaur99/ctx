@@ -14,8 +14,9 @@ pub use accessibility::{
 pub use config::{Config, ConfigError, Service, Workspace};
 pub use paths::{AppPaths, PathsError};
 pub use recovery::{
-    GenericAppAdapter, RecoveryAdapter, RecoveryError, RecoveryRegistry, SystemVsCodePlatform,
-    VsCodeAdapter, VsCodePlatform, default_recovery_registry,
+    AntigravityAdapter, AntigravityPlatform, GenericAppAdapter, RecoveryAdapter, RecoveryError,
+    RecoveryRegistry, SystemAntigravityPlatform, SystemVsCodePlatform, VsCodeAdapter,
+    VsCodePlatform, default_recovery_registry,
 };
 pub use runtime::{RuntimeError, RuntimeState};
 pub use snapshot::{SnapshotWindowReport, snapshot_workspace};
