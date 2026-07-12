@@ -12,3 +12,7 @@
 
 # Graphify
 graphify-out/
+
+# Agents/IDE/AI config
+.codex
+# .agents/ # Not adding this because of plans, also can add skills if required, dyad (github) does this
