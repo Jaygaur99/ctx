@@ -6,8 +6,8 @@ use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
 use clap::Parser;
 use cli::{Cli, Commands, WindowFilters};
 use ctx_core::{
-    AppPaths, Config, GenericAppAdapter, RecoveryRegistry, RuntimeState, WindowInfo,
-    WindowResolution, WindowState, WindowStatus, close_windows, inspect_windows, list_all_windows,
+    AppPaths, Config, GenericAppAdapter, RuntimeState, WindowInfo, WindowResolution, WindowState,
+    WindowStatus, close_windows, default_recovery_registry, inspect_windows, list_all_windows,
     list_windows, minimize_windows_best_effort, reconcile_windows, resolve_window,
     snapshot_workspace, switch_workspace,
 };
@@ -78,7 +78,7 @@ fn snapshot(
     let report = snapshot_workspace(
         workspace,
         &list_all_windows()?,
-        &RecoveryRegistry::new(),
+        &default_recovery_registry(),
         &GenericAppAdapter,
     )?;
     config.save(&config_path)?;

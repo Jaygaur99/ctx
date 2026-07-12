@@ -36,6 +36,9 @@ pub enum AccessibilityError {
     #[error("window {id} does not expose a close button")]
     CloseUnavailable { id: u32 },
 
+    #[error("window {id} does not expose a project or document path")]
+    DocumentUnavailable { id: u32 },
+
     #[cfg(target_os = "macos")]
     #[error("macOS accessibility operation failed for window {id}: {source}")]
     Operation {
@@ -382,6 +385,68 @@ fn window_bounds(window: &accessibility::ui_element::AXUIElement) -> Option<Wind
         width: dimensions.width.round() as i32,
         height: dimensions.height.round() as i32,
     })
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn window_document_path(
+    current: &WindowInfo,
+) -> Result<std::path::PathBuf, AccessibilityError> {
+    use std::ptr;
+
+    use accessibility::attribute::AXAttribute;
+    use accessibility_sys::kAXDocumentAttribute;
+    use core_foundation::{
+        base::{CFType, TCFType},
+        string::CFString,
+        url::{CFURL, CFURLCreateWithString},
+    };
+
+    if !request_accessibility_permission() {
+        return Err(AccessibilityError::PermissionRequired);
+    }
+
+    let window = accessibility_window(current, false)?;
+    let attribute = AXAttribute::<CFType>::new(&CFString::from_static_string(kAXDocumentAttribute));
+    let value = window
+        .attribute(&attribute)
+        .map_err(|source| AccessibilityError::Operation {
+            id: current.id,
+            source,
+        })?;
+
+    if let Some(url) = value.downcast::<CFURL>()
+        && let Some(path) = url.to_path()
+    {
+        return Ok(path);
+    }
+
+    if let Some(document) = value.downcast::<CFString>() {
+        let document = document.to_string();
+        if document.starts_with('/') {
+            return Ok(document.into());
+        }
+
+        let document = CFString::new(&document);
+        let url = unsafe {
+            CFURLCreateWithString(ptr::null(), document.as_concrete_TypeRef(), ptr::null())
+        };
+        if !url.is_null() {
+            let url = unsafe { CFURL::wrap_under_create_rule(url) };
+            if let Some(path) = url.to_path() {
+                return Ok(path);
+            }
+        }
+    }
+
+    Err(AccessibilityError::DocumentUnavailable { id: current.id })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn window_document_path(
+    current: &WindowInfo,
+) -> Result<std::path::PathBuf, AccessibilityError> {
+    let _ = current;
+    Err(AccessibilityError::UnsupportedPlatform)
 }
 
 #[cfg(not(target_os = "macos"))]

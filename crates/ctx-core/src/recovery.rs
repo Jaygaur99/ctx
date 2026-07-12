@@ -4,6 +4,10 @@ use thiserror::Error;
 
 use crate::{RecoveryState, WindowInfo};
 
+mod editor;
+
+pub use editor::{SystemVsCodePlatform, VsCodeAdapter, VsCodePlatform};
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum RecoveryError {
     #[error("could not capture recovery state: {0}")]
@@ -84,6 +88,19 @@ impl RecoveryRegistry {
             .as_deref()
             .and_then(|bundle_id| self.adapter_for(bundle_id))
     }
+}
+
+pub fn default_recovery_registry() -> RecoveryRegistry {
+    let adapter: Arc<dyn RecoveryAdapter> = Arc::new(VsCodeAdapter::system());
+    let mut registry = RecoveryRegistry::new();
+    for bundle_id in [
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCodeInsiders",
+        "com.visualstudio.code.oss",
+    ] {
+        registry.register(bundle_id, adapter.clone());
+    }
+    registry
 }
 
 fn normalize_bundle_id(bundle_id: &str) -> String {
@@ -260,5 +277,18 @@ mod tests {
         assert_eq!(adapter.capture(&saved).unwrap(), RecoveryState::Generic);
         assert!(adapter.matches(&saved, &candidate));
         assert!(!adapter.matches(&saved, &window(100, Some("com.microsoft.VSCode"))));
+    }
+
+    #[test]
+    fn default_registry_selects_vscode_by_bundle_id() {
+        let registry = default_recovery_registry();
+
+        assert!(registry.adapter_for("com.microsoft.VSCode").is_some());
+        assert!(
+            registry
+                .adapter_for("com.microsoft.VSCodeInsiders")
+                .is_some()
+        );
+        assert!(registry.adapter_for("org.mozilla.firefox").is_none());
     }
 }
