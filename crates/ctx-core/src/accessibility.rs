@@ -223,11 +223,7 @@ pub(crate) fn accessibility_window(
     current: &WindowInfo,
     activate_application: bool,
 ) -> Result<accessibility::ui_element::AXUIElement, AccessibilityError> {
-    use std::{
-        process::{Command, Stdio},
-        thread,
-        time::Duration,
-    };
+    use std::{thread, time::Duration};
 
     use accessibility::{
         attribute::{AXAttribute, AXUIElementAttributes},
@@ -240,12 +236,11 @@ pub(crate) fn accessibility_window(
     };
 
     if activate_application {
-        let _ = Command::new("/usr/bin/open")
-            .args(["-a", &current.owner])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        thread::sleep(Duration::from_millis(250));
+        activate_running_application(current.pid);
+        // Accessibility does not expose an application's normal windows while
+        // they live on another macOS Desktop. Give the Space transition time
+        // to complete before asking for AXWindows.
+        thread::sleep(Duration::from_millis(500));
     }
 
     let application = AXUIElement::application(current.pid);
@@ -309,6 +304,25 @@ pub(crate) fn accessibility_window(
                 candidates,
             }
         })
+}
+
+#[cfg(target_os = "macos")]
+#[allow(deprecated, unexpected_cfgs)]
+fn activate_running_application(pid: i32) {
+    use cocoa::{
+        appkit::{NSApplicationActivateIgnoringOtherApps, NSRunningApplication},
+        base::nil,
+        foundation::NSAutoreleasePool,
+    };
+
+    unsafe {
+        let pool = NSAutoreleasePool::new(nil);
+        let application = NSRunningApplication::runningApplicationWithProcessIdentifier(nil, pid);
+        if application != nil {
+            application.activateWithOptions_(NSApplicationActivateIgnoringOtherApps);
+        }
+        pool.drain();
+    }
 }
 
 #[cfg(target_os = "macos")]
