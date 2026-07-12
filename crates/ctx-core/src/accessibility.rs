@@ -2,6 +2,19 @@ use thiserror::Error;
 
 use crate::{WindowBounds, WindowInfo, list_all_windows};
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct WindowActionFailure {
+    pub id: u32,
+    pub owner: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct WindowActionReport {
+    pub affected: Vec<u32>,
+    pub skipped: Vec<WindowActionFailure>,
+}
+
 #[derive(Debug, Error)]
 pub enum AccessibilityError {
     #[error(
@@ -68,6 +81,40 @@ pub fn minimize_windows(saved_windows: &[WindowInfo]) -> Result<(), Accessibilit
 }
 
 #[cfg(target_os = "macos")]
+pub fn minimize_windows_best_effort(
+    saved_windows: &[WindowInfo],
+) -> Result<WindowActionReport, AccessibilityError> {
+    if !request_accessibility_permission() {
+        return Err(AccessibilityError::PermissionRequired);
+    }
+
+    let current_windows = list_all_windows()?;
+    let mut report = WindowActionReport {
+        affected: Vec::new(),
+        skipped: Vec::new(),
+    };
+
+    for saved in saved_windows {
+        let result = current_windows
+            .iter()
+            .find(|window| window.id == saved.id && window.owner == saved.owner)
+            .ok_or(AccessibilityError::WindowMissing { id: saved.id })
+            .and_then(|current| set_window_minimized(current, true));
+
+        match result {
+            Ok(()) => report.affected.push(saved.id),
+            Err(error) => report.skipped.push(WindowActionFailure {
+                id: saved.id,
+                owner: saved.owner.clone(),
+                error: error.to_string(),
+            }),
+        }
+    }
+
+    Ok(report)
+}
+
+#[cfg(target_os = "macos")]
 pub fn restore_windows(saved_windows: &[WindowInfo]) -> Result<(), AccessibilityError> {
     set_minimized(saved_windows, false)
 }
@@ -91,7 +138,7 @@ pub fn close_windows(saved_windows: &[WindowInfo]) -> Result<(), AccessibilityEr
             .iter()
             .find(|window| window.id == saved.id && window.owner == saved.owner)
             .ok_or(AccessibilityError::WindowMissing { id: saved.id })?;
-        let window = accessibility_window(current)?;
+        let window = accessibility_window(current, true)?;
         let close_button_attribute =
             AXAttribute::<CFType>::new(&CFString::from_static_string(kAXCloseButtonAttribute));
         let close_button = window
@@ -113,9 +160,6 @@ pub fn close_windows(saved_windows: &[WindowInfo]) -> Result<(), AccessibilityEr
 
 #[cfg(target_os = "macos")]
 fn set_minimized(saved_windows: &[WindowInfo], minimized: bool) -> Result<(), AccessibilityError> {
-    use accessibility::{action::AXUIElementActions, attribute::AXAttribute};
-    use core_foundation::boolean::CFBoolean;
-
     if !request_accessibility_permission() {
         return Err(AccessibilityError::PermissionRequired);
     }
@@ -127,30 +171,39 @@ fn set_minimized(saved_windows: &[WindowInfo], minimized: bool) -> Result<(), Ac
             .iter()
             .find(|window| window.id == saved.id && window.owner == saved.owner)
             .ok_or(AccessibilityError::WindowMissing { id: saved.id })?;
-        let window = accessibility_window(current)?;
+        set_window_minimized(current, minimized)?;
+    }
 
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn set_window_minimized(current: &WindowInfo, minimized: bool) -> Result<(), AccessibilityError> {
+    use accessibility::{action::AXUIElementActions, attribute::AXAttribute};
+    use core_foundation::boolean::CFBoolean;
+
+    let window = accessibility_window(current, !minimized)?;
+    window
+        .set_attribute(
+            &AXAttribute::minimized(),
+            if minimized {
+                CFBoolean::true_value()
+            } else {
+                CFBoolean::false_value()
+            },
+        )
+        .map_err(|source| AccessibilityError::Operation {
+            id: current.id,
+            source,
+        })?;
+
+    if !minimized {
         window
-            .set_attribute(
-                &AXAttribute::minimized(),
-                if minimized {
-                    CFBoolean::true_value()
-                } else {
-                    CFBoolean::false_value()
-                },
-            )
+            .raise()
             .map_err(|source| AccessibilityError::Operation {
-                id: saved.id,
+                id: current.id,
                 source,
             })?;
-
-        if !minimized {
-            window
-                .raise()
-                .map_err(|source| AccessibilityError::Operation {
-                    id: saved.id,
-                    source,
-                })?;
-        }
     }
 
     Ok(())
@@ -159,6 +212,7 @@ fn set_minimized(saved_windows: &[WindowInfo], minimized: bool) -> Result<(), Ac
 #[cfg(target_os = "macos")]
 fn accessibility_window(
     current: &WindowInfo,
+    activate_application: bool,
 ) -> Result<accessibility::ui_element::AXUIElement, AccessibilityError> {
     use std::{process::Command, thread, time::Duration};
 
@@ -172,10 +226,12 @@ fn accessibility_window(
         string::CFString,
     };
 
-    let _ = Command::new("/usr/bin/open")
-        .args(["-a", &current.owner])
-        .status();
-    thread::sleep(Duration::from_millis(250));
+    if activate_application {
+        let _ = Command::new("/usr/bin/open")
+            .args(["-a", &current.owner])
+            .status();
+        thread::sleep(Duration::from_millis(250));
+    }
 
     let application = AXUIElement::application(current.pid);
     for attribute_name in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
@@ -318,6 +374,13 @@ fn window_bounds(window: &accessibility::ui_element::AXUIElement) -> Option<Wind
 
 #[cfg(not(target_os = "macos"))]
 pub fn minimize_windows(_saved_windows: &[WindowInfo]) -> Result<(), AccessibilityError> {
+    Err(AccessibilityError::UnsupportedPlatform)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn minimize_windows_best_effort(
+    _saved_windows: &[WindowInfo],
+) -> Result<WindowActionReport, AccessibilityError> {
     Err(AccessibilityError::UnsupportedPlatform)
 }
 

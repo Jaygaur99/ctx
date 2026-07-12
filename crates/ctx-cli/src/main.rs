@@ -7,8 +7,8 @@ use clap::Parser;
 use cli::{Cli, Commands, WindowFilters};
 use ctx_core::{
     AppPaths, Config, RuntimeState, WindowInfo, WindowResolution, WindowState, WindowStatus,
-    close_windows, inspect_windows, list_all_windows, list_windows, reconcile_windows,
-    resolve_window, switch_workspace,
+    close_windows, inspect_windows, list_all_windows, list_windows, minimize_windows_best_effort,
+    reconcile_windows, resolve_window, switch_workspace,
 };
 use error::CliError;
 use serde_json::{Value, json};
@@ -48,10 +48,60 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Add { name, window_ids } => add_workspace(config, name, window_ids, json),
         Commands::Switch { name } => switch_to_workspace(config, name, json),
         Commands::Status => show_status(config, json),
+        Commands::HideAll => hide_all(config, json),
         Commands::Show { name } => show_workspace(config, name, json),
         Commands::Remove { name } => remove_workspace(config, name, json),
         Commands::Close { name } => close_workspace(config, name, json),
     }
+}
+
+fn hide_all(config_override: Option<PathBuf>, json_output: bool) -> Result<(), CliError> {
+    let app_paths = AppPaths::discover()?;
+    let config_path = config_override.unwrap_or(app_paths.config_file);
+    let mut config = Config::load(&config_path)?;
+    let state = RuntimeState::load(app_paths.runtime_file)?;
+    let active_name = state.active_workspace.ok_or(CliError::NoActiveWorkspace)?;
+    let current_windows = list_all_windows()?;
+    let active =
+        config
+            .workspaces
+            .get_mut(&active_name)
+            .ok_or_else(|| CliError::WorkspaceMissing {
+                name: active_name.clone(),
+            })?;
+    let statuses = reconcile_windows(&mut active.windows, &current_windows);
+    ensure_windows_resolved(&active_name, &statuses)?;
+    let active_ids: std::collections::BTreeSet<_> =
+        active.windows.iter().map(|window| window.id).collect();
+    let windows_to_hide: Vec<_> = current_windows
+        .into_iter()
+        .filter(|window| !active_ids.contains(&window.id))
+        .collect();
+    let report = minimize_windows_best_effort(&windows_to_hide)?;
+
+    config.save(config_path)?;
+
+    if json_output {
+        print_json(json!({
+            "active_workspace": active_name,
+            "hidden": report.affected,
+            "skipped": report.skipped,
+        }))?;
+    } else {
+        println!(
+            "Hid {} windows outside workspace '{}'.",
+            report.affected.len(),
+            active_name
+        );
+        for failure in report.skipped {
+            println!(
+                "Skipped window {} ({}): {}",
+                failure.id, failure.owner, failure.error
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn init_config(config_override: Option<PathBuf>, json_output: bool) -> Result<(), CliError> {

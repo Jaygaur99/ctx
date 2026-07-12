@@ -54,6 +54,10 @@ pub enum Commands {
     /// Show the current workspace
     Status,
 
+    /// Minimize every window except those in the active workspace
+    #[command(name = "hideAll", visible_aliases = ["hide-all", "hidall"])]
+    HideAll,
+
     /// Show one workspace and its live window state
     Show {
         /// Workspace name
@@ -175,6 +179,15 @@ mod tests {
         let cli = Cli::try_parse_from(["ctx", "close"]).unwrap();
 
         assert_eq!(cli.command, Commands::Close { name: None });
+    }
+
+    #[test]
+    fn parses_hide_all_command_and_aliases() {
+        for name in ["hideAll", "hide-all", "hidall"] {
+            let cli = Cli::try_parse_from(["ctx", name]).unwrap();
+
+            assert_eq!(cli.command, Commands::HideAll);
+        }
     }
 
     #[test]
