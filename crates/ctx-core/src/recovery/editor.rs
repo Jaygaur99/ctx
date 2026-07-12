@@ -23,6 +23,10 @@ pub struct SystemVsCodePlatform;
 
 impl VsCodePlatform for SystemVsCodePlatform {
     fn project_path(&self, window: &WindowInfo) -> Result<PathBuf, RecoveryError> {
+        if let Some(project_path) = vscode_workspace_path(window) {
+            return Ok(project_path);
+        }
+
         crate::accessibility::window_document_path(window)
             .map_err(|error| RecoveryError::Capture(error.to_string()))
     }
@@ -48,6 +52,109 @@ impl VsCodePlatform for SystemVsCodePlatform {
                 project_path.display()
             ))
         })
+    }
+}
+
+fn vscode_workspace_path(window: &WindowInfo) -> Option<PathBuf> {
+    let support_directory = match window.bundle_id.as_deref()?.to_ascii_lowercase().as_str() {
+        "com.microsoft.vscode" => "Code",
+        "com.microsoft.vscodeinsiders" => "Code - Insiders",
+        "com.visualstudio.code.oss" => "Code - OSS",
+        _ => return None,
+    };
+    let storage_path = directories::BaseDirs::new()?
+        .home_dir()
+        .join("Library/Application Support")
+        .join(support_directory)
+        .join("User/globalStorage/storage.json");
+    let storage = serde_json::from_reader(std::fs::File::open(storage_path).ok()?).ok()?;
+
+    vscode_workspace_path_from_storage(window, &storage)
+}
+
+fn vscode_workspace_path_from_storage(
+    window: &WindowInfo,
+    storage: &serde_json::Value,
+) -> Option<PathBuf> {
+    let windows_state = storage.get("windowsState")?;
+    let mut states = Vec::new();
+    if let Some(last_active) = windows_state.get("lastActiveWindow") {
+        states.push(last_active);
+    }
+    if let Some(opened) = windows_state
+        .get("openedWindows")
+        .and_then(|value| value.as_array())
+    {
+        states.extend(opened);
+    }
+
+    let candidates: Vec<_> = states
+        .into_iter()
+        .filter_map(|state| {
+            let uri = state
+                .get("folder")
+                .and_then(|value| value.as_str())
+                .or_else(|| {
+                    state
+                        .pointer("/workspace/configPath")
+                        .and_then(|value| value.as_str())
+                })?;
+            Some((file_uri_path(uri)?, vscode_window_bounds(state)))
+        })
+        .collect();
+
+    if let Some(expected) = window.bounds {
+        let matching: Vec<_> = candidates
+            .iter()
+            .filter(|(_, bounds)| bounds.is_some_and(|actual| expected.is_close_to(actual)))
+            .collect();
+        if let [candidate] = matching.as_slice() {
+            return Some(candidate.0.clone());
+        }
+    }
+
+    match candidates.as_slice() {
+        [(path, _)] => Some(path.clone()),
+        _ => None,
+    }
+}
+
+fn vscode_window_bounds(state: &serde_json::Value) -> Option<crate::WindowBounds> {
+    let ui_state = state.get("uiState")?;
+    Some(crate::WindowBounds {
+        x: i32::try_from(ui_state.get("x")?.as_i64()?).ok()?,
+        y: i32::try_from(ui_state.get("y")?.as_i64()?).ok()?,
+        width: i32::try_from(ui_state.get("width")?.as_i64()?).ok()?,
+        height: i32::try_from(ui_state.get("height")?.as_i64()?).ok()?,
+    })
+}
+
+fn file_uri_path(uri: &str) -> Option<PathBuf> {
+    let encoded_path = uri.strip_prefix("file://")?;
+    let bytes = encoded_path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = hex_digit(*bytes.get(index + 1)?)?;
+            let low = hex_digit(*bytes.get(index + 2)?)?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    String::from_utf8(decoded).ok().map(PathBuf::from)
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -296,6 +403,64 @@ mod tests {
             [PathBuf::from("/tmp/devLayout")]
         );
         assert!(adapter.matches(&saved, &window(99, "COM.MICROSOFT.VSCODE")));
+    }
+
+    #[test]
+    fn reads_vscode_workspace_path_when_active_editor_has_no_document() {
+        let mut current = window(1, "com.microsoft.VSCode");
+        current.bounds = Some(crate::WindowBounds {
+            x: 0,
+            y: 33,
+            width: 1470,
+            height: 923,
+        });
+        let storage = serde_json::json!({
+            "windowsState": {
+                "lastActiveWindow": {
+                    "folder": "file:///Users/jay/My%20Project",
+                    "uiState": {
+                        "x": 0,
+                        "y": 33,
+                        "width": 1470,
+                        "height": 923
+                    }
+                },
+                "openedWindows": []
+            }
+        });
+
+        assert_eq!(
+            vscode_workspace_path_from_storage(&current, &storage),
+            Some(PathBuf::from("/Users/jay/My Project"))
+        );
+    }
+
+    #[test]
+    fn matches_vscode_workspace_by_window_geometry() {
+        let mut current = window(1, "com.microsoft.VSCode");
+        current.bounds = Some(crate::WindowBounds {
+            x: 100,
+            y: 100,
+            width: 1200,
+            height: 800,
+        });
+        let storage = serde_json::json!({
+            "windowsState": {
+                "lastActiveWindow": {
+                    "folder": "file:///tmp/other",
+                    "uiState": { "x": 0, "y": 33, "width": 1470, "height": 923 }
+                },
+                "openedWindows": [{
+                    "folder": "file:///tmp/expected",
+                    "uiState": { "x": 100, "y": 100, "width": 1200, "height": 800 }
+                }]
+            }
+        });
+
+        assert_eq!(
+            vscode_workspace_path_from_storage(&current, &storage),
+            Some(PathBuf::from("/tmp/expected"))
+        );
     }
 
     #[test]

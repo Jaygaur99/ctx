@@ -50,12 +50,23 @@ pub fn snapshot_workspace(
         let (recovery, warning) = match selected {
             Some(adapter) => match adapter.capture(window) {
                 Ok(recovery) => (recovery, None),
-                Err(error) => (
-                    fallback.capture(window)?,
-                    Some(format!(
-                        "app-specific capture failed ({error}); using generic recovery"
-                    )),
-                ),
+                Err(error) => match window.recovery.clone() {
+                    Some(previous) if !matches!(previous, crate::RecoveryState::Generic) => {
+                        let kind = previous.kind().as_str();
+                        (
+                            previous,
+                            Some(format!(
+                                "app-specific capture failed ({error}); preserved previous {kind} recovery snapshot"
+                            )),
+                        )
+                    }
+                    _ => (
+                        fallback.capture(window)?,
+                        Some(format!(
+                            "app-specific capture failed ({error}); using generic recovery"
+                        )),
+                    ),
+                },
             },
             None => {
                 let reason = if window.bundle_id.is_some() {
@@ -191,6 +202,35 @@ mod tests {
                 .as_deref()
                 .unwrap()
                 .contains("test capture failure")
+        );
+    }
+
+    #[test]
+    fn adapter_capture_failure_preserves_previous_exact_snapshot() {
+        let mut registry = RecoveryRegistry::new();
+        registry.register("com.example.test", Arc::new(FailingAdapter));
+        let mut saved = window(1, "window");
+        saved.recovery = Some(RecoveryState::Editor {
+            project_path: PathBuf::from("/tmp/project"),
+        });
+        let current = saved.clone();
+        let mut workspace = workspace(vec![saved]);
+
+        let report =
+            snapshot_workspace(&mut workspace, &[current], &registry, &GenericAppAdapter).unwrap();
+
+        assert_eq!(
+            workspace.windows[0].recovery,
+            Some(RecoveryState::Editor {
+                project_path: PathBuf::from("/tmp/project")
+            })
+        );
+        assert!(
+            report[0]
+                .warning
+                .as_deref()
+                .unwrap()
+                .contains("preserved previous editor recovery snapshot")
         );
     }
 }
