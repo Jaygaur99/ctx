@@ -91,6 +91,10 @@ fn snapshot(
         }))?;
     } else {
         let captured = report.iter().filter(|window| window.captured).count();
+        let degraded = report
+            .iter()
+            .filter(|window| window.warning.is_some())
+            .count();
         println!(
             "Snapshotted {captured}/{} windows in workspace '{name}'.",
             report.len()
@@ -102,6 +106,11 @@ fn snapshot(
                     window.id, window.application
                 );
             }
+        }
+        if degraded > 0 {
+            println!(
+                "Snapshot is degraded for {degraded} window(s); do not close them if exact context recovery is required."
+            );
         }
     }
 
