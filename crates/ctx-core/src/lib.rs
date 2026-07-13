@@ -25,12 +25,12 @@ pub use recovery::{
 pub use runtime::{RuntimeError, RuntimeState};
 pub use snapshot::{SnapshotWindowReport, snapshot_workspace};
 pub use spaces::{
-    DesktopSpace, DisplaySpaces, SpaceError, SpaceInventory, WindowPlacement, list_spaces,
-    window_placement,
+    DesktopSpace, DisplaySpaces, SpaceError, SpaceInventory, WindowPlacement,
+    capture_desktop_placement, list_spaces, window_placement,
 };
 pub use switcher::{SwitchError, switch_workspace};
 pub use windows::{
-    BrowserTabState, RecoveryKind, RecoveryState, TerminalTabState, WindowBounds, WindowError,
-    WindowInfo, WindowResolution, WindowState, WindowStatus, inspect_windows, list_all_windows,
-    list_windows, reconcile_windows, resolve_window,
+    BrowserTabState, DesktopPlacement, RecoveryKind, RecoveryState, TerminalTabState, WindowBounds,
+    WindowError, WindowInfo, WindowResolution, WindowState, WindowStatus, inspect_windows,
+    list_all_windows, list_windows, reconcile_windows, resolve_window,
 };

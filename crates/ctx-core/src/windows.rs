@@ -19,6 +19,16 @@ pub struct WindowInfo {
     pub recovery: Option<RecoveryState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_warning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<DesktopPlacement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement_warning: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopPlacement {
+    pub display_uuid: String,
+    pub desktop_ordinal: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,9 +127,13 @@ pub struct WindowStatus {
     pub recovery_ready: bool,
     pub recovery_degraded: bool,
     pub recovery_warning: Option<String>,
+    pub placement: Option<DesktopPlacement>,
+    pub placement_degraded: bool,
+    pub placement_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum WindowResolution {
     Resolved(WindowInfo),
     Ambiguous(Vec<WindowInfo>),
@@ -253,6 +267,8 @@ fn list_windows_with_options(options: u32) -> Result<Vec<WindowInfo>, WindowErro
                 application_path,
                 recovery: None,
                 recovery_warning: None,
+                placement: None,
+                placement_warning: None,
             })
         })
         .collect();
@@ -412,6 +428,9 @@ pub fn inspect_windows(
             };
             let recovery_warning = saved.recovery_warning.clone();
             let recovery_degraded = recovery_warning.is_some();
+            let placement = saved.placement.clone();
+            let placement_warning = saved.placement_warning.clone();
+            let placement_degraded = placement_warning.is_some();
 
             match resolve_window(saved, all_windows) {
                 WindowResolution::Resolved(current) => WindowStatus {
@@ -432,6 +451,9 @@ pub fn inspect_windows(
                     recovery_ready,
                     recovery_degraded,
                     recovery_warning,
+                    placement,
+                    placement_degraded,
+                    placement_warning,
                 },
                 WindowResolution::Ambiguous(_) => WindowStatus {
                     saved_id: saved.id,
@@ -444,6 +466,9 @@ pub fn inspect_windows(
                     recovery_ready,
                     recovery_degraded,
                     recovery_warning,
+                    placement,
+                    placement_degraded,
+                    placement_warning,
                 },
                 WindowResolution::Missing => WindowStatus {
                     saved_id: saved.id,
@@ -456,6 +481,9 @@ pub fn inspect_windows(
                     recovery_ready,
                     recovery_degraded,
                     recovery_warning,
+                    placement,
+                    placement_degraded,
+                    placement_warning,
                 },
             }
         })
@@ -543,6 +571,8 @@ mod tests {
             application_path: None,
             recovery: None,
             recovery_warning: None,
+            placement: None,
+            placement_warning: None,
         }
     }
 
@@ -589,6 +619,11 @@ mod tests {
             project_path: PathBuf::from("/tmp/project"),
         });
         saved.recovery_warning = Some("captured with fallback".to_string());
+        saved.placement = Some(DesktopPlacement {
+            display_uuid: "Main".to_string(),
+            desktop_ordinal: 3,
+        });
+        saved.placement_warning = Some("using previous placement".to_string());
 
         let current = window(99, "Code", "new title", 12);
         reconcile_windows(std::slice::from_mut(&mut saved), &[current]);
@@ -610,16 +645,32 @@ mod tests {
             saved.recovery_warning.as_deref(),
             Some("captured with fallback")
         );
+        assert_eq!(
+            saved.placement,
+            Some(DesktopPlacement {
+                display_uuid: "Main".to_string(),
+                desktop_ordinal: 3,
+            })
+        );
+        assert_eq!(
+            saved.placement_warning.as_deref(),
+            Some("using previous placement")
+        );
     }
 
     #[test]
-    fn inspection_reports_recovery_readiness_and_warning() {
+    fn inspection_reports_recovery_and_placement_readiness() {
         let mut saved = window(1, "Code", "project", 10);
         saved.bundle_id = Some("com.microsoft.VSCode".to_string());
         saved.recovery = Some(RecoveryState::Editor {
             project_path: PathBuf::from("/tmp/project"),
         });
         saved.recovery_warning = Some("captured from document metadata".to_string());
+        saved.placement = Some(DesktopPlacement {
+            display_uuid: "Main".to_string(),
+            desktop_ordinal: 2,
+        });
+        saved.placement_warning = Some("using previous placement".to_string());
 
         let status = inspect_windows(std::slice::from_ref(&saved), &[], &[])
             .pop()
@@ -636,6 +687,9 @@ mod tests {
         assert_eq!(json["recovery_kind"], "editor");
         assert_eq!(json["recovery_ready"], true);
         assert_eq!(json["recovery_degraded"], true);
+        assert_eq!(json["placement"]["display_uuid"], "Main");
+        assert_eq!(json["placement"]["desktop_ordinal"], 2);
+        assert_eq!(json["placement_degraded"], true);
     }
 }
 

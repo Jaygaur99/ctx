@@ -520,6 +520,8 @@ mod tests {
             application_path: Some(PathBuf::from("/Applications/Firefox.app")),
             recovery: None,
             recovery_warning: None,
+            placement: None,
+            placement_warning: None,
         }
     }
 

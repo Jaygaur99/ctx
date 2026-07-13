@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::{
     RecoveryAdapter, RecoveryError, RecoveryKind, RecoveryRegistry, WindowInfo, WindowState,
-    Workspace, reconcile_windows,
+    Workspace, capture_desktop_placement, reconcile_windows,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -12,6 +12,8 @@ pub struct SnapshotWindowReport {
     pub captured: bool,
     pub recovery_kind: Option<RecoveryKind>,
     pub warning: Option<String>,
+    pub placement_captured: bool,
+    pub placement_warning: Option<String>,
 }
 
 pub fn snapshot_workspace(
@@ -42,6 +44,11 @@ pub fn snapshot_workspace(
                 captured: false,
                 recovery_kind: window.recovery.as_ref().map(|state| state.kind()),
                 warning: Some(warning),
+                placement_captured: false,
+                placement_warning: Some(format!(
+                    "window is {}; preserved its previous Desktop placement",
+                    state_label(status.state)
+                )),
             });
             continue;
         }
@@ -83,12 +90,28 @@ pub fn snapshot_workspace(
         let recovery_kind = recovery.kind();
         window.recovery = Some(recovery);
         window.recovery_warning.clone_from(&warning);
+        let (placement_captured, placement_warning) = match capture_desktop_placement(window.id) {
+            Ok(placement) => {
+                window.placement = Some(placement);
+                window.placement_warning = None;
+                (true, None)
+            }
+            Err(error) => {
+                let warning = format!(
+                    "Desktop placement capture failed ({error}); preserved the previous placement"
+                );
+                window.placement_warning = Some(warning.clone());
+                (false, Some(warning))
+            }
+        };
         report.push(SnapshotWindowReport {
             id: window.id,
             application: window.owner.clone(),
             captured: true,
             recovery_kind: Some(recovery_kind),
             warning,
+            placement_captured,
+            placement_warning,
         });
     }
 
@@ -142,6 +165,8 @@ mod tests {
             application_path: Some(PathBuf::from("/Applications/Test App.app")),
             recovery: None,
             recovery_warning: None,
+            placement: None,
+            placement_warning: None,
         }
     }
 

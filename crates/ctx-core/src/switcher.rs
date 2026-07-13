@@ -469,6 +469,8 @@ mod tests {
             application_path: Some(PathBuf::from(format!("/Applications/{bundle}.app"))),
             recovery: recovery.then_some(RecoveryState::Generic),
             recovery_warning: None,
+            placement: None,
+            placement_warning: None,
         }
     }
 

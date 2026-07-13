@@ -8,9 +8,9 @@ The implementation remains local-first and native Rust. A Tauri application is n
 
 ## Product Rules
 
-- [ ] Persist a stable placement description instead of relying only on the opaque live Space ID.
-- [ ] Treat Desktop placement as best-effort metadata; failure must not corrupt recovery state or make ordinary switching unusable.
-- [ ] Preserve placement independently for every window in a workspace.
+- [x] Persist a stable placement description instead of relying only on the opaque live Space ID.
+- [x] Treat Desktop placement as best-effort metadata; failure must not corrupt recovery state or make ordinary switching unusable.
+- [x] Preserve placement independently for every window in a workspace.
 - [ ] Support multiple displays by recording the display and the Desktop's ordinal on that display.
 - [ ] Move an existing window before restoring/focusing it.
 - [ ] Move a newly recovered window after it is matched and before restoring/focusing it.
@@ -31,12 +31,12 @@ Smoke gate: two windows placed on different existing Desktops are reported with 
 
 ## Step 2: Capture and Persistence
 
-- [ ] Add optional placement metadata to `WindowInfo` with backward-compatible Serde defaults.
-- [ ] Capture placement when a window is added to a workspace.
-- [ ] Refresh placement during `ctx snapshot` without discarding the previous valid placement on a transient query failure.
-- [ ] Preserve placement when stale window IDs are reconciled.
-- [ ] Show placement and degradation in text and JSON output.
-- [ ] Add config round-trip and backward-compatibility tests.
+- [x] Add optional placement metadata to `WindowInfo` with backward-compatible Serde defaults.
+- [x] Capture placement when a window is added to a workspace.
+- [x] Refresh placement during `ctx snapshot` without discarding the previous valid placement on a transient query failure.
+- [x] Preserve placement when stale window IDs are reconciled.
+- [x] Show placement and degradation in text and JSON output.
+- [x] Add config round-trip and backward-compatibility tests.
 
 Smoke gate: clearing and recreating a workspace records the correct display and Desktop ordinal for every selected window.
 

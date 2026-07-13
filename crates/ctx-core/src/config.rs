@@ -317,6 +317,8 @@ workspaces:
         assert!(window.application_path.is_none());
         assert!(window.recovery.is_none());
         assert!(window.recovery_warning.is_none());
+        assert!(window.placement.is_none());
+        assert!(window.placement_warning.is_none());
     }
 
     #[test]
@@ -441,6 +443,11 @@ workspaces: {}
                     application_path: None,
                     recovery: None,
                     recovery_warning: None,
+                    placement: Some(crate::DesktopPlacement {
+                        display_uuid: "Main".to_string(),
+                        desktop_ordinal: 2,
+                    }),
+                    placement_warning: Some("using saved display mapping".to_string()),
                 }],
             )
             .unwrap();
@@ -478,6 +485,8 @@ workspaces: {}
                         active_tab: Some(0),
                     }),
                     recovery_warning: Some("one pinned tab was unavailable".to_string()),
+                    placement: None,
+                    placement_warning: None,
                 }],
             )
             .unwrap();

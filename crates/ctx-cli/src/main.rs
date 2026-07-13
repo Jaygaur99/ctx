@@ -7,9 +7,10 @@ use clap::Parser;
 use cli::{Cli, Commands, WindowFilters};
 use ctx_core::{
     AppPaths, Config, GenericAppAdapter, RuntimeState, WindowInfo, WindowResolution, WindowState,
-    WindowStatus, close_windows, default_recovery_registry, inspect_windows, list_all_windows,
-    list_spaces, list_windows, minimize_windows_best_effort, reconcile_windows, resolve_window,
-    save_switch_transaction, snapshot_workspace, switch_workspace, window_placement,
+    WindowStatus, capture_desktop_placement, close_windows, default_recovery_registry,
+    inspect_windows, list_all_windows, list_spaces, list_windows, minimize_windows_best_effort,
+    reconcile_windows, resolve_window, save_switch_transaction, snapshot_workspace,
+    switch_workspace, window_placement,
 };
 use error::CliError;
 use serde_json::{Value, json};
@@ -132,7 +133,7 @@ fn snapshot(
         let captured = report.iter().filter(|window| window.captured).count();
         let degraded = report
             .iter()
-            .filter(|window| window.warning.is_some())
+            .filter(|window| window.warning.is_some() || window.placement_warning.is_some())
             .count();
         println!(
             "Snapshotted {captured}/{} windows in workspace '{name}'.",
@@ -142,6 +143,12 @@ fn snapshot(
             if let Some(warning) = window.warning {
                 println!(
                     "Warning for window {} ({}): {warning}",
+                    window.id, window.application
+                );
+            }
+            if let Some(warning) = window.placement_warning {
+                println!(
+                    "Placement warning for window {} ({}): {warning}",
                     window.id, window.application
                 );
             }
@@ -381,7 +388,15 @@ fn add_workspace(
             .ok_or(CliError::WindowNotSelectable { id })?;
 
         if !selected.iter().any(|selected| selected.id == id) {
-            selected.push(window.clone());
+            let mut window = window.clone();
+            match capture_desktop_placement(window.id) {
+                Ok(placement) => window.placement = Some(placement),
+                Err(error) => {
+                    window.placement_warning =
+                        Some(format!("Desktop placement capture failed: {error}"));
+                }
+            }
+            selected.push(window);
         }
     }
 
@@ -635,6 +650,15 @@ fn print_window_statuses(statuses: &[WindowStatus]) {
         );
         if let Some(warning) = &status.recovery_warning {
             println!("      recovery warning: {warning}");
+        }
+        if let Some(placement) = &status.placement {
+            println!(
+                "      placement: Desktop {} on display {}",
+                placement.desktop_ordinal, placement.display_uuid
+            );
+        }
+        if let Some(warning) = &status.placement_warning {
+            println!("      placement warning: {warning}");
         }
     }
 }

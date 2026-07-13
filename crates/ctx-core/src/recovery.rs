@@ -218,6 +218,8 @@ mod tests {
             application_path: None,
             recovery: None,
             recovery_warning: None,
+            placement: None,
+            placement_warning: None,
         }
     }
 

@@ -341,6 +341,8 @@ mod tests {
             application_path: Some(PathBuf::from("/Applications/Warp.app")),
             recovery: None,
             recovery_warning: None,
+            placement: None,
+            placement_warning: None,
         }
     }
 

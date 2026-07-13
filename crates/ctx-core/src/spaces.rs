@@ -1,6 +1,8 @@
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::DesktopPlacement;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SpaceInventory {
     pub displays: Vec<DisplaySpaces>,
@@ -52,6 +54,14 @@ pub fn window_placement(window_id: u32) -> Result<WindowPlacement, SpaceError> {
 #[cfg(not(target_os = "macos"))]
 pub fn window_placement(_window_id: u32) -> Result<WindowPlacement, SpaceError> {
     Err(SpaceError::UnsupportedPlatform)
+}
+
+pub fn capture_desktop_placement(window_id: u32) -> Result<DesktopPlacement, SpaceError> {
+    let placement = window_placement(window_id)?;
+    Ok(DesktopPlacement {
+        display_uuid: placement.display_uuid,
+        desktop_ordinal: placement.desktop_ordinal,
+    })
 }
 
 #[cfg(not(target_os = "macos"))]
