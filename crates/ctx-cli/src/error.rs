@@ -1,6 +1,6 @@
 use ctx_core::{
-    AccessibilityError, ConfigError, PathsError, RecoveryError, RuntimeError, SwitchError,
-    SwitchPersistenceError, WindowError, WindowState,
+    AccessibilityError, ConfigError, PathsError, RecoveryError, RuntimeError, SpaceError,
+    SwitchError, SwitchPersistenceError, WindowError, WindowState,
 };
 use thiserror::Error;
 
@@ -23,6 +23,9 @@ pub enum CliError {
 
     #[error(transparent)]
     Recovery(#[from] RecoveryError),
+
+    #[error(transparent)]
+    Space(#[from] SpaceError),
 
     #[error(transparent)]
     Switch(#[from] SwitchError),

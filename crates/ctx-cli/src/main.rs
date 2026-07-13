@@ -8,8 +8,8 @@ use cli::{Cli, Commands, WindowFilters};
 use ctx_core::{
     AppPaths, Config, GenericAppAdapter, RuntimeState, WindowInfo, WindowResolution, WindowState,
     WindowStatus, close_windows, default_recovery_registry, inspect_windows, list_all_windows,
-    list_windows, minimize_windows_best_effort, reconcile_windows, resolve_window,
-    save_switch_transaction, snapshot_workspace, switch_workspace,
+    list_spaces, list_windows, minimize_windows_best_effort, reconcile_windows, resolve_window,
+    save_switch_transaction, snapshot_workspace, switch_workspace, window_placement,
 };
 use error::CliError;
 use serde_json::{Value, json};
@@ -46,6 +46,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Init => init_config(config, json),
         Commands::List { filters } => list_window_command(config, false, filters, json),
         Commands::ListAll { filters } => list_window_command(config, true, filters, json),
+        Commands::Spaces { window_id } => show_spaces(window_id, json),
         Commands::Add { name, window_ids } => add_workspace(config, name, window_ids, json),
         Commands::Switch { name } => switch_to_workspace(config, name, json),
         Commands::Snapshot { name } => snapshot(config, name, json),
@@ -57,6 +58,44 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Remove { name } => remove_workspace(config, name, json),
         Commands::Close { name } => close_workspace(config, name, json),
     }
+}
+
+fn show_spaces(window_id: Option<u32>, json_output: bool) -> Result<(), CliError> {
+    if let Some(window_id) = window_id {
+        let placement = window_placement(window_id)?;
+        if json_output {
+            print_json(serde_json::to_value(placement)?)?;
+        } else {
+            println!(
+                "Window {}: Desktop {} on display {} (space {})",
+                placement.window_id,
+                placement.desktop_ordinal,
+                placement.display_uuid,
+                placement.space_id
+            );
+        }
+        return Ok(());
+    }
+    let inventory = list_spaces()?;
+    if json_output {
+        print_json(serde_json::to_value(inventory)?)?;
+    } else {
+        for display in inventory.displays {
+            println!("Display {}", display.uuid);
+            for desktop in display.desktops {
+                let current = if desktop.id == display.current_space_id {
+                    " *"
+                } else {
+                    ""
+                };
+                println!(
+                    "  Desktop {} (space {}){current}",
+                    desktop.ordinal, desktop.id
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 fn snapshot(

@@ -19,13 +19,13 @@ The implementation remains local-first and native Rust. A Tauri application is n
 
 ## Step 1: Native Space Inventory
 
-- [ ] Add a macOS-only `spaces` module behind a small platform trait.
-- [ ] Dynamically load the required SkyLight symbols so unsupported macOS versions produce a typed error instead of a linker or startup failure.
-- [ ] Enumerate managed displays, ordered user Desktops, and the current Desktop.
-- [ ] Query the Space membership for a Core Graphics window ID.
-- [ ] Filter fullscreen/system Spaces from user Desktop ordinals.
-- [ ] Add pure unit tests for inventory normalization and ordinal mapping.
-- [ ] Add an internal diagnostic command or JSON field to inspect the detected placement before enabling mutation.
+- [x] Add a macOS-only `spaces` module behind a typed API boundary.
+- [x] Dynamically load the required SkyLight symbols so unsupported macOS versions produce a typed error instead of a linker or startup failure.
+- [x] Enumerate managed displays, ordered user Desktops, and the current Desktop, with a read-only `com.apple.spaces` fallback when SkyLight returns no inventory.
+- [x] Query the Space membership for a Core Graphics window ID.
+- [x] Filter fullscreen/system Spaces from user Desktop ordinals.
+- [x] Add pure unit tests for inventory normalization and ordinal mapping.
+- [x] Add `ctx spaces [window-id]` with text and JSON output to inspect placement before enabling mutation.
 
 Smoke gate: two windows placed on different existing Desktops are reported with different Desktop ordinals, and repeated inspection is stable.
 

@@ -5,6 +5,7 @@ pub mod persistence;
 pub mod recovery;
 pub mod runtime;
 pub mod snapshot;
+pub mod spaces;
 pub mod switcher;
 pub mod windows;
 
@@ -23,6 +24,10 @@ pub use recovery::{
 };
 pub use runtime::{RuntimeError, RuntimeState};
 pub use snapshot::{SnapshotWindowReport, snapshot_workspace};
+pub use spaces::{
+    DesktopSpace, DisplaySpaces, SpaceError, SpaceInventory, WindowPlacement, list_spaces,
+    window_placement,
+};
 pub use switcher::{SwitchError, switch_workspace};
 pub use windows::{
     BrowserTabState, RecoveryKind, RecoveryState, TerminalTabState, WindowBounds, WindowError,

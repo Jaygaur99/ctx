@@ -238,6 +238,7 @@ dependencies = [
  "accessibility-sys",
  "cocoa",
  "core-foundation",
+ "core-foundation-sys",
  "core-graphics 0.25.0",
  "directories",
  "objc",

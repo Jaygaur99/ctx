@@ -35,6 +35,12 @@ pub enum Commands {
         filters: WindowFilters,
     },
 
+    /// Inspect macOS displays and their ordered user Desktops
+    Spaces {
+        /// Show the Desktop placement of one Core Graphics window
+        window_id: Option<u32>,
+    },
+
     /// Create a workspace from visible window IDs
     Add {
         /// Name for the new workspace
@@ -122,6 +128,13 @@ mod tests {
                 name: "devlayout".to_string()
             }
         )
+    }
+
+    #[test]
+    fn parses_spaces_command() {
+        let cli = Cli::try_parse_from(["ctx", "spaces"]).unwrap();
+
+        assert_eq!(cli.command, Commands::Spaces { window_id: None });
     }
 
     #[test]
