@@ -108,16 +108,29 @@ mod macos {
         mem,
         process::Command,
         ptr,
+        sync::{Mutex, MutexGuard},
+        thread,
+        time::{Duration, Instant},
     };
 
-    use cocoa::{base::nil, foundation::NSAutoreleasePool};
-    use core_foundation::{array::CFArray, base::TCFType, number::CFNumber, string::CFString};
+    use accessibility::{
+        action::AXUIElementActions,
+        attribute::{AXAttribute, AXUIElementAttributes},
+        ui_element::AXUIElement,
+    };
+    use core_foundation::{
+        array::CFArray,
+        base::{CFType, TCFType},
+        number::CFNumber,
+        string::CFString,
+    };
     use core_foundation_sys::{
         array::{CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef},
         base::CFRelease,
         dictionary::{CFDictionaryGetValue, CFDictionaryRef},
         number::{CFNumberGetValue, CFNumberRef, kCFNumberSInt64Type},
         string::CFStringRef,
+        uuid::{CFUUIDCreateFromString, CFUUIDRef},
     };
 
     use super::{
@@ -128,6 +141,7 @@ mod macos {
     const RTLD_LAZY: c_int = 0x1;
     const RTLD_LOCAL: c_int = 0x4;
     const SKYLIGHT_PATH: &CStr = c"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight";
+    static SKYLIGHT_LOCK: Mutex<()> = Mutex::new(());
 
     type MainConnectionId = unsafe extern "C" fn() -> c_int;
     type CopyManagedDisplaySpaces = unsafe extern "C" fn(c_int) -> CFArrayRef;
@@ -135,6 +149,10 @@ mod macos {
     type SpaceGetType = unsafe extern "C" fn(c_int, u64) -> c_int;
     type CopySpacesForWindows = unsafe extern "C" fn(c_int, c_int, CFArrayRef) -> CFArrayRef;
     type MoveWindowsToManagedSpace = unsafe extern "C" fn(c_int, CFArrayRef, u64);
+    type SpaceSetCompatId = unsafe extern "C" fn(c_int, u64, c_int) -> c_int;
+    type SetWindowListWorkspace = unsafe extern "C" fn(c_int, *const u32, c_int, c_int) -> c_int;
+    type CoreDockSendNotification = unsafe extern "C" fn(CFStringRef, c_int) -> c_int;
+    type DisplayGetIdFromUuid = unsafe extern "C" fn(CFUUIDRef) -> u32;
 
     unsafe extern "C" {
         fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
@@ -150,6 +168,10 @@ mod macos {
         space_get_type: SpaceGetType,
         copy_spaces_for_windows: CopySpacesForWindows,
         move_windows_to_managed_space: Option<MoveWindowsToManagedSpace>,
+        space_set_compat_id: Option<SpaceSetCompatId>,
+        set_window_list_workspace: Option<SetWindowListWorkspace>,
+        core_dock_send_notification: Option<CoreDockSendNotification>,
+        display_get_id_from_uuid: Option<DisplayGetIdFromUuid>,
     }
 
     impl SkyLight {
@@ -206,31 +228,49 @@ mod macos {
                     .map(|pointer| {
                         mem::transmute::<*mut c_void, MoveWindowsToManagedSpace>(pointer)
                     }),
+                    space_set_compat_id: symbol_any(
+                        handle,
+                        &[c"CGSSpaceSetCompatID", c"SLSSpaceSetCompatID"],
+                    )
+                    .ok()
+                    .map(|pointer| mem::transmute::<*mut c_void, SpaceSetCompatId>(pointer)),
+                    set_window_list_workspace: symbol_any(
+                        handle,
+                        &[c"CGSSetWindowListWorkspace", c"SLSSetWindowListWorkspace"],
+                    )
+                    .ok()
+                    .map(|pointer| mem::transmute::<*mut c_void, SetWindowListWorkspace>(pointer)),
+                    core_dock_send_notification: symbol(handle, c"CoreDockSendNotification")
+                        .ok()
+                        .map(|pointer| {
+                            mem::transmute::<*mut c_void, CoreDockSendNotification>(pointer)
+                        }),
+                    display_get_id_from_uuid: symbol(handle, c"CGDisplayGetDisplayIDFromUUID")
+                        .ok()
+                        .map(|pointer| {
+                            mem::transmute::<*mut c_void, DisplayGetIdFromUuid>(pointer)
+                        }),
                 })
             }
         }
     }
 
     pub(super) fn list_spaces() -> Result<SpaceInventory, SpaceError> {
+        let _guard = skylight_lock();
         unsafe {
-            let pool = NSAutoreleasePool::new(nil);
-            let result = (|| {
-                let api = SkyLight::load()?;
-                let connection = (api.main_connection_id)();
-                let raw_displays = (api.copy_managed_display_spaces)(connection);
-                if raw_displays.is_null() {
-                    return plist_inventory();
-                }
+            let api = SkyLight::load()?;
+            let connection = (api.main_connection_id)();
+            let raw_displays = (api.copy_managed_display_spaces)(connection);
+            if raw_displays.is_null() {
+                return plist_inventory();
+            }
 
-                let result = parse_displays(&api, connection, raw_displays);
-                CFRelease(raw_displays.cast());
-                match result {
-                    Ok(displays) => Ok(SpaceInventory { displays }),
-                    Err(_) => plist_inventory(),
-                }
-            })();
-            pool.drain();
-            result
+            let result = parse_displays(&api, connection, raw_displays);
+            CFRelease(raw_displays.cast());
+            match result {
+                Ok(displays) => Ok(SpaceInventory { displays }),
+                Err(_) => plist_inventory(),
+            }
         }
     }
 
@@ -265,27 +305,225 @@ mod macos {
         placement: &DesktopPlacement,
     ) -> Result<PlacementChange, SpaceError> {
         let inventory = list_spaces()?;
-        let destination = resolve_desktop(&inventory, placement)?;
+        let destination = match resolve_desktop(&inventory, placement) {
+            Ok(desktop) => *desktop,
+            Err(SpaceError::DesktopUnavailable { .. }) => ensure_desktop(placement)?,
+            Err(error) => return Err(error),
+        };
         if window_placement(window_id).is_ok_and(|current| current.space_id == destination.id) {
             return Ok(PlacementChange::AlreadyPlaced);
         }
 
+        let _guard = skylight_lock();
         let api = SkyLight::load()?;
-        let move_windows = api.move_windows_to_managed_space.ok_or_else(|| {
-            SpaceError::ApiUnavailable(
-                "SkyLight does not expose managed-Space window movement".to_string(),
-            )
-        })?;
         let connection = unsafe { (api.main_connection_id)() };
         let window_number = CFNumber::from(i64::from(window_id));
         let windows = CFArray::from_CFTypes(&[window_number]);
-        unsafe {
-            move_windows(connection, windows.as_concrete_TypeRef(), destination.id);
+        if uses_compat_workspace_move()
+            && let (Some(set_compat), Some(set_workspace)) =
+                (api.space_set_compat_id, api.set_window_list_workspace)
+        {
+            const CTX_COMPAT_ID: c_int = 0x6374_7821;
+            unsafe {
+                set_compat(connection, destination.id, CTX_COMPAT_ID);
+                set_workspace(connection, &window_id, 1, CTX_COMPAT_ID);
+                set_compat(connection, destination.id, 0);
+            }
+        } else if let Some(move_windows) = api.move_windows_to_managed_space {
+            unsafe {
+                move_windows(connection, windows.as_concrete_TypeRef(), destination.id);
+            }
+        } else {
+            return Err(SpaceError::ApiUnavailable(
+                "SkyLight does not expose a compatible managed-Space window movement API"
+                    .to_string(),
+            ));
         }
         Ok(PlacementChange::Moved)
     }
 
+    fn uses_compat_workspace_move() -> bool {
+        Command::new("/usr/bin/sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .is_some_and(|version| version_requires_compat_move(version.trim()))
+    }
+
+    pub(super) fn version_requires_compat_move(version: &str) -> bool {
+        let mut parts = version
+            .split('.')
+            .filter_map(|part| part.parse::<u32>().ok());
+        let major = parts.next().unwrap_or_default();
+        let minor = parts.next().unwrap_or_default();
+        major > 14 || (major == 14 && minor >= 5)
+    }
+
+    fn ensure_desktop(placement: &DesktopPlacement) -> Result<DesktopSpace, SpaceError> {
+        let mut inventory = list_spaces()?;
+        let existing_count = inventory
+            .displays
+            .iter()
+            .find(|display| display.uuid == placement.display_uuid)
+            .ok_or_else(|| SpaceError::DisplayUnavailable {
+                display_uuid: placement.display_uuid.clone(),
+            })?
+            .desktops
+            .len();
+        let missing = missing_desktop_count(existing_count, placement.desktop_ordinal);
+
+        for _ in 0..missing {
+            create_desktop(&placement.display_uuid)?;
+            let previous_count = inventory
+                .displays
+                .iter()
+                .find(|display| display.uuid == placement.display_uuid)
+                .map_or(0, |display| display.desktops.len());
+            inventory = wait_for_desktop_count(&placement.display_uuid, previous_count + 1)?;
+        }
+
+        resolve_desktop(&inventory, placement).copied()
+    }
+
+    fn wait_for_desktop_count(
+        display_uuid: &str,
+        expected: usize,
+    ) -> Result<SpaceInventory, SpaceError> {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let inventory = list_spaces()?;
+            let count = inventory
+                .displays
+                .iter()
+                .find(|display| display.uuid == display_uuid)
+                .map_or(0, |display| display.desktops.len());
+            if count >= expected {
+                return Ok(inventory);
+            }
+            if Instant::now() >= deadline {
+                return Err(SpaceError::InvalidMetadata(format!(
+                    "Desktop creation did not add Desktop {expected} on display '{display_uuid}'"
+                )));
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    fn create_desktop(display_uuid: &str) -> Result<(), SpaceError> {
+        if !crate::request_accessibility_permission() {
+            return Err(SpaceError::ApiUnavailable(
+                "Accessibility permission is required to create a macOS Desktop".to_string(),
+            ));
+        }
+        let api = SkyLight::load()?;
+        let notify = api.core_dock_send_notification.ok_or_else(|| {
+            SpaceError::ApiUnavailable(
+                "CoreDock Mission Control notification is unavailable".to_string(),
+            )
+        })?;
+        let display_id = display_id(&api, display_uuid)?;
+        let mission_control = CFString::new("com.apple.expose.awake");
+        unsafe {
+            notify(mission_control.as_concrete_TypeRef(), 0);
+        }
+
+        let result = (|| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                if let Ok(dock) = AXUIElement::application_with_bundle("com.apple.dock")
+                    && let Some(display) = find_element(&dock, 0, &|element| {
+                        element_identifier(element).as_deref() == Some("mc.display")
+                            && element_display_id(element) == Some(display_id)
+                    })
+                    && let Some(add) = find_element(&display, 0, &|element| {
+                        element_identifier(element).as_deref() == Some("mc.spaces.add")
+                    })
+                {
+                    return add.press().map_err(|error| {
+                        SpaceError::ApiUnavailable(format!(
+                            "could not press the Mission Control add-Desktop control: {error}"
+                        ))
+                    });
+                }
+                if Instant::now() >= deadline {
+                    return Err(SpaceError::ApiUnavailable(format!(
+                        "Mission Control did not expose an add-Desktop control for display '{display_uuid}'"
+                    )));
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        })();
+
+        unsafe {
+            notify(mission_control.as_concrete_TypeRef(), 0);
+        }
+        result
+    }
+
+    fn display_id(api: &SkyLight, display_uuid: &str) -> Result<u32, SpaceError> {
+        if display_uuid == "Main" {
+            return Ok(core_graphics::display::CGDisplay::main().id);
+        }
+        let get_id = api.display_get_id_from_uuid.ok_or_else(|| {
+            SpaceError::ApiUnavailable(
+                "CoreGraphics display UUID resolution is unavailable".to_string(),
+            )
+        })?;
+        let value = CFString::new(display_uuid);
+        let uuid = unsafe { CFUUIDCreateFromString(ptr::null(), value.as_concrete_TypeRef()) };
+        if uuid.is_null() {
+            return Err(SpaceError::InvalidMetadata(format!(
+                "display identifier '{display_uuid}' is not a UUID"
+            )));
+        }
+        let id = unsafe { get_id(uuid) };
+        unsafe { CFRelease(uuid.cast()) };
+        if id == 0 {
+            Err(SpaceError::DisplayUnavailable {
+                display_uuid: display_uuid.to_string(),
+            })
+        } else {
+            Ok(id)
+        }
+    }
+
+    fn find_element(
+        element: &AXUIElement,
+        depth: usize,
+        predicate: &impl Fn(&AXUIElement) -> bool,
+    ) -> Option<AXUIElement> {
+        if predicate(element) {
+            return Some(element.clone());
+        }
+        if depth >= 8 {
+            return None;
+        }
+        element
+            .children()
+            .ok()?
+            .iter()
+            .find_map(|child| find_element(&child, depth + 1, predicate))
+    }
+
+    fn element_identifier(element: &AXUIElement) -> Option<String> {
+        element.identifier().ok().map(|value| value.to_string())
+    }
+
+    fn element_display_id(element: &AXUIElement) -> Option<u32> {
+        let attribute = AXAttribute::<CFType>::new(&CFString::new("AXDisplayID"));
+        element
+            .attribute(&attribute)
+            .ok()?
+            .downcast::<CFNumber>()?
+            .to_i64()?
+            .try_into()
+            .ok()
+    }
+
     fn skylight_window_space(window_id: u32) -> Result<u64, SpaceError> {
+        let _guard = skylight_lock();
         let api = SkyLight::load()?;
         let connection = unsafe { (api.main_connection_id)() };
         let window_number = CFNumber::from(i64::from(window_id));
@@ -308,6 +546,12 @@ mod macos {
         id.ok_or_else(|| {
             SpaceError::InvalidMetadata(format!("window {window_id} has no Space membership"))
         })
+    }
+
+    fn skylight_lock() -> MutexGuard<'static, ()> {
+        SKYLIGHT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn plist_inventory() -> Result<SpaceInventory, SpaceError> {
@@ -546,6 +790,10 @@ mod macos {
             })
     }
 
+    pub(super) fn missing_desktop_count(existing: usize, target_ordinal: usize) -> usize {
+        target_ordinal.saturating_sub(existing)
+    }
+
     unsafe fn symbol(handle: *mut c_void, name: &CStr) -> Result<*mut c_void, SpaceError> {
         let pointer = unsafe { dlsym(handle, name.as_ptr()) };
         if pointer.is_null() {
@@ -659,5 +907,20 @@ mod tests {
             ),
             Err(SpaceError::DesktopUnavailable { .. })
         ));
+    }
+
+    #[test]
+    fn creates_only_the_minimum_number_of_missing_desktops() {
+        assert_eq!(macos::missing_desktop_count(1, 3), 2);
+        assert_eq!(macos::missing_desktop_count(3, 3), 0);
+        assert_eq!(macos::missing_desktop_count(4, 3), 0);
+    }
+
+    #[test]
+    fn uses_workspace_compatibility_move_on_sonoma_14_5_and_newer() {
+        assert!(!macos::version_requires_compat_move("14.4.1"));
+        assert!(macos::version_requires_compat_move("14.5"));
+        assert!(macos::version_requires_compat_move("15.0"));
+        assert!(macos::version_requires_compat_move("26.0"));
     }
 }

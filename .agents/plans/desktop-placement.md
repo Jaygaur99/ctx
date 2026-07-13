@@ -53,11 +53,11 @@ Smoke gate: VS Code, Firefox, and Warp recover onto their recorded existing Desk
 
 ## Step 4: Create Missing Desktops
 
-- [ ] Detect when the recorded Desktop ordinal no longer exists on its display.
-- [ ] Create only the minimum number of missing Desktops.
-- [ ] Re-enumerate Spaces after each creation instead of assuming new IDs or ordering.
-- [ ] Refuse to remove or reorder user Desktops.
-- [ ] Add a capability check and an explicit warning when Desktop creation is unsupported on the current macOS release.
+- [x] Detect when the recorded Desktop ordinal no longer exists on its display.
+- [x] Create only the minimum number of missing Desktops through Mission Control's per-display accessibility control.
+- [x] Re-enumerate Spaces after each creation instead of assuming new IDs or ordering.
+- [x] Refuse to remove or reorder user Desktops.
+- [x] Add a capability check and an explicit degradation warning when CoreDock or Mission Control accessibility is unavailable.
 
 Smoke gate: with one Desktop present and a window recorded on Desktop 3, Ctx creates two Desktops and restores the window onto Desktop 3.
 
