@@ -11,11 +11,11 @@ The implementation remains local-first and native Rust. A Tauri application is n
 - [x] Persist a stable placement description instead of relying only on the opaque live Space ID.
 - [x] Treat Desktop placement as best-effort metadata; failure must not corrupt recovery state or make ordinary switching unusable.
 - [x] Preserve placement independently for every window in a workspace.
-- [ ] Support multiple displays by recording the display and the Desktop's ordinal on that display.
-- [ ] Move an existing window before restoring/focusing it.
-- [ ] Move a newly recovered window after it is matched and before restoring/focusing it.
-- [ ] Never move ignored or unassigned windows.
-- [ ] Report degraded placement clearly in `snapshot`, `show`, `status`, and JSON output.
+- [x] Support multiple displays by recording the display and the Desktop's ordinal on that display.
+- [x] Move an existing window before restoring/focusing it.
+- [x] Move a newly recovered window after it is matched and before restoring/focusing it.
+- [x] Never move ignored or unassigned windows.
+- [x] Report degraded placement clearly in `snapshot`, `show`, `status`, and JSON output.
 
 ## Step 1: Native Space Inventory
 
@@ -42,12 +42,12 @@ Smoke gate: clearing and recreating a workspace records the correct display and 
 
 ## Step 3: Restore to Existing Desktops
 
-- [ ] Add a typed operation for moving a window to an existing managed Space.
-- [ ] Integrate placement after recovery matching and before window restore/focus.
-- [ ] Apply placement to windows that never closed as well as newly recovered windows.
-- [ ] Keep the current active Desktop stable unless switching it is required to activate the target workspace.
-- [ ] Roll back focus/minimize state if a required placement operation fails.
-- [ ] Make repeated `ctx switch` idempotent and avoid duplicate app recovery.
+- [x] Add a typed operation for moving a window to an existing managed Space.
+- [x] Integrate placement after recovery matching and before window restore/focus.
+- [x] Apply placement to windows that never closed as well as newly recovered windows.
+- [x] Keep the current active Desktop stable while moving windows.
+- [x] Treat placement failure as degraded metadata without rolling back a successful app recovery or ordinary switch.
+- [x] Make repeated `ctx switch` idempotent and avoid duplicate app recovery.
 
 Smoke gate: VS Code, Firefox, and Warp recover onto their recorded existing Desktops and a second switch creates no windows and performs no unnecessary moves.
 

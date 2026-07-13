@@ -3,10 +3,11 @@ use std::{collections::BTreeSet, thread, time::Duration};
 use thiserror::Error;
 
 use crate::{
-    AccessibilityError, Config, GenericAppAdapter, RecoveryAdapter, RecoveryError,
-    RecoveryRegistry, RecoveryState, RuntimeState, WindowInfo, WindowResolution, WindowState,
-    default_recovery_registry, list_all_windows, minimize_windows, minimize_windows_best_effort,
-    reconcile_windows, resolve_window, restore_windows, windows::refresh_window_fingerprint,
+    AccessibilityError, Config, DesktopPlacement, GenericAppAdapter, PlacementChange,
+    RecoveryAdapter, RecoveryError, RecoveryRegistry, RecoveryState, RuntimeState, SpaceError,
+    WindowInfo, WindowResolution, WindowState, default_recovery_registry, list_all_windows,
+    minimize_windows, minimize_windows_best_effort, move_window_to_desktop, reconcile_windows,
+    resolve_window, restore_windows, windows::refresh_window_fingerprint,
 };
 
 const RECOVERY_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -53,6 +54,11 @@ trait SwitchPlatform {
     fn minimize(&mut self, windows: &[WindowInfo]) -> Result<(), SwitchError>;
     fn minimize_best_effort(&mut self, windows: &[WindowInfo]);
     fn restore(&mut self, windows: &[WindowInfo]) -> Result<(), SwitchError>;
+    fn place(
+        &mut self,
+        window: &WindowInfo,
+        placement: &DesktopPlacement,
+    ) -> Result<PlacementChange, SpaceError>;
     fn wait(&mut self, duration: Duration);
 }
 
@@ -83,6 +89,14 @@ impl SwitchPlatform for MacOsSwitchPlatform {
         }
         restore_windows(windows)?;
         Ok(())
+    }
+
+    fn place(
+        &mut self,
+        window: &WindowInfo,
+        placement: &DesktopPlacement,
+    ) -> Result<PlacementChange, SpaceError> {
+        move_window_to_desktop(window.id, placement)
     }
 
     fn wait(&mut self, duration: Duration) {
@@ -220,6 +234,7 @@ fn switch_workspace_with(
         }
     };
 
+    apply_desktop_placements(target, &after, platform);
     let target_windows = resolved_windows(&target.windows, &after);
     if previous_name.as_deref() == Some(target_name) {
         platform.restore(&target_windows)?;
@@ -238,6 +253,28 @@ fn switch_workspace_with(
 
     state.active_workspace = Some(target_name.to_string());
     Ok(())
+}
+
+fn apply_desktop_placements(
+    target: &mut crate::Workspace,
+    current_windows: &[WindowInfo],
+    platform: &mut dyn SwitchPlatform,
+) {
+    for saved in &mut target.windows {
+        let Some(placement) = saved.placement.clone() else {
+            continue;
+        };
+        let WindowResolution::Resolved(current) = resolve_window(saved, current_windows) else {
+            continue;
+        };
+        match platform.place(&current, &placement) {
+            Ok(_) => saved.placement_warning = None,
+            Err(error) => {
+                saved.placement_warning =
+                    Some(format!("Desktop placement restore failed: {error}"));
+            }
+        }
+    }
 }
 
 fn poll_for_recovered_windows(
@@ -412,6 +449,10 @@ mod tests {
         latest: Vec<WindowInfo>,
         minimized: Vec<Vec<u32>>,
         restored: Vec<Vec<u32>>,
+        placements: Vec<(u32, DesktopPlacement)>,
+        placement_moves: Vec<(u32, DesktopPlacement)>,
+        events: Vec<&'static str>,
+        placement_error: bool,
     }
 
     impl FakePlatform {
@@ -421,6 +462,10 @@ mod tests {
                 latest: Vec::new(),
                 minimized: Vec::new(),
                 restored: Vec::new(),
+                placements: Vec::new(),
+                placement_moves: Vec::new(),
+                events: Vec::new(),
+                placement_error: false,
             }
         }
     }
@@ -445,9 +490,31 @@ mod tests {
         }
 
         fn restore(&mut self, windows: &[WindowInfo]) -> Result<(), SwitchError> {
+            self.events.push("restore");
             self.restored
                 .push(windows.iter().map(|window| window.id).collect());
             Ok(())
+        }
+
+        fn place(
+            &mut self,
+            window: &WindowInfo,
+            placement: &DesktopPlacement,
+        ) -> Result<PlacementChange, SpaceError> {
+            self.events.push("place");
+            if self.placement_error {
+                return Err(SpaceError::ApiUnavailable("simulated failure".to_string()));
+            }
+            if self
+                .placements
+                .iter()
+                .any(|(id, current)| *id == window.id && current == placement)
+            {
+                return Ok(PlacementChange::AlreadyPlaced);
+            }
+            self.placements.push((window.id, placement.clone()));
+            self.placement_moves.push((window.id, placement.clone()));
+            Ok(PlacementChange::Moved)
         }
 
         fn wait(&mut self, _duration: Duration) {}
@@ -536,6 +603,123 @@ mod tests {
         assert_eq!(platform.minimized, [vec![1]]);
         assert_eq!(platform.restored, [vec![99]]);
         assert_eq!(state.active_workspace.as_deref(), Some("target"));
+    }
+
+    #[test]
+    fn places_existing_and_recovered_windows_before_restore() {
+        let mut existing = window(10, "existing.app", "Existing", false);
+        existing.placement = Some(DesktopPlacement {
+            display_uuid: "Main".to_string(),
+            desktop_ordinal: 2,
+        });
+        let mut missing = window(20, "missing.app", "Missing", true);
+        missing.placement = Some(DesktopPlacement {
+            display_uuid: "Main".to_string(),
+            desktop_ordinal: 3,
+        });
+        let recovered = window(99, "missing.app", "Missing", false);
+        let adapter = FakeAdapter::default();
+        let mut platform = FakePlatform::new(vec![
+            vec![existing.clone()],
+            vec![existing.clone(), recovered],
+        ]);
+        let mut config = config(Vec::new(), vec![existing, missing]);
+        let mut state = RuntimeState::default();
+
+        switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &adapter,
+            &mut platform,
+        )
+        .unwrap();
+
+        assert_eq!(
+            platform.placement_moves,
+            [
+                (
+                    10,
+                    DesktopPlacement {
+                        display_uuid: "Main".to_string(),
+                        desktop_ordinal: 2,
+                    }
+                ),
+                (
+                    99,
+                    DesktopPlacement {
+                        display_uuid: "Main".to_string(),
+                        desktop_ordinal: 3,
+                    }
+                ),
+            ]
+        );
+        assert_eq!(platform.events, ["place", "place", "restore"]);
+    }
+
+    #[test]
+    fn repeated_switch_does_not_repeat_a_desktop_move() {
+        let mut saved = window(2, "target.app", "Target", false);
+        saved.placement = Some(DesktopPlacement {
+            display_uuid: "Main".to_string(),
+            desktop_ordinal: 2,
+        });
+        let mut platform = FakePlatform::new(vec![vec![saved.clone()]]);
+        let mut config = config(Vec::new(), vec![saved]);
+        let mut state = RuntimeState::default();
+
+        switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &FakeAdapter::default(),
+            &mut platform,
+        )
+        .unwrap();
+        switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &FakeAdapter::default(),
+            &mut platform,
+        )
+        .unwrap();
+
+        assert_eq!(platform.placement_moves.len(), 1);
+    }
+
+    #[test]
+    fn placement_failure_is_degraded_without_blocking_workspace_switch() {
+        let mut saved = window(2, "target.app", "Target", false);
+        saved.placement = Some(DesktopPlacement {
+            display_uuid: "Missing".to_string(),
+            desktop_ordinal: 2,
+        });
+        let mut platform = FakePlatform::new(vec![vec![saved.clone()]]);
+        platform.placement_error = true;
+        let mut config = config(Vec::new(), vec![saved]);
+        let mut state = RuntimeState::default();
+
+        switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &FakeAdapter::default(),
+            &mut platform,
+        )
+        .unwrap();
+
+        assert_eq!(state.active_workspace.as_deref(), Some("target"));
+        assert!(
+            config.workspace("target").unwrap().windows[0]
+                .placement_warning
+                .as_deref()
+                .is_some_and(|warning| warning.contains("simulated failure"))
+        );
     }
 
     #[test]

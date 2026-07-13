@@ -29,6 +29,12 @@ pub struct WindowPlacement {
     pub desktop_ordinal: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlacementChange {
+    AlreadyPlaced,
+    Moved,
+}
+
 #[derive(Debug, Error)]
 pub enum SpaceError {
     #[error("macOS Desktop inspection is only supported on macOS")]
@@ -39,6 +45,15 @@ pub enum SpaceError {
 
     #[error("macOS returned invalid Desktop metadata: {0}")]
     InvalidMetadata(String),
+
+    #[error("display '{display_uuid}' is unavailable")]
+    DisplayUnavailable { display_uuid: String },
+
+    #[error("display '{display_uuid}' has no Desktop {desktop_ordinal}")]
+    DesktopUnavailable {
+        display_uuid: String,
+        desktop_ordinal: usize,
+    },
 }
 
 #[cfg(target_os = "macos")]
@@ -62,6 +77,22 @@ pub fn capture_desktop_placement(window_id: u32) -> Result<DesktopPlacement, Spa
         display_uuid: placement.display_uuid,
         desktop_ordinal: placement.desktop_ordinal,
     })
+}
+
+#[cfg(target_os = "macos")]
+pub fn move_window_to_desktop(
+    window_id: u32,
+    placement: &DesktopPlacement,
+) -> Result<PlacementChange, SpaceError> {
+    macos::move_window_to_desktop(window_id, placement)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn move_window_to_desktop(
+    _window_id: u32,
+    _placement: &DesktopPlacement,
+) -> Result<PlacementChange, SpaceError> {
+    Err(SpaceError::UnsupportedPlatform)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -89,7 +120,10 @@ mod macos {
         string::CFStringRef,
     };
 
-    use super::{DesktopSpace, DisplaySpaces, SpaceError, SpaceInventory, WindowPlacement};
+    use super::{
+        DesktopPlacement, DesktopSpace, DisplaySpaces, PlacementChange, SpaceError, SpaceInventory,
+        WindowPlacement,
+    };
 
     const RTLD_LAZY: c_int = 0x1;
     const RTLD_LOCAL: c_int = 0x4;
@@ -100,6 +134,7 @@ mod macos {
     type ManagedDisplayGetCurrentSpace = unsafe extern "C" fn(c_int, CFStringRef) -> u64;
     type SpaceGetType = unsafe extern "C" fn(c_int, u64) -> c_int;
     type CopySpacesForWindows = unsafe extern "C" fn(c_int, c_int, CFArrayRef) -> CFArrayRef;
+    type MoveWindowsToManagedSpace = unsafe extern "C" fn(c_int, CFArrayRef, u64);
 
     unsafe extern "C" {
         fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
@@ -114,6 +149,7 @@ mod macos {
         managed_display_get_current_space: ManagedDisplayGetCurrentSpace,
         space_get_type: SpaceGetType,
         copy_spaces_for_windows: CopySpacesForWindows,
+        move_windows_to_managed_space: Option<MoveWindowsToManagedSpace>,
     }
 
     impl SkyLight {
@@ -159,6 +195,17 @@ mod macos {
                             &[c"CGSCopySpacesForWindows", c"SLSCopySpacesForWindows"],
                         )?,
                     ),
+                    move_windows_to_managed_space: symbol_any(
+                        handle,
+                        &[
+                            c"CGSMoveWindowsToManagedSpace",
+                            c"SLSMoveWindowsToManagedSpace",
+                        ],
+                    )
+                    .ok()
+                    .map(|pointer| {
+                        mem::transmute::<*mut c_void, MoveWindowsToManagedSpace>(pointer)
+                    }),
                 })
             }
         }
@@ -211,6 +258,31 @@ mod macos {
                     "window {window_id} belongs to unknown or non-user Space {space_id}"
                 ))
             })
+    }
+
+    pub(super) fn move_window_to_desktop(
+        window_id: u32,
+        placement: &DesktopPlacement,
+    ) -> Result<PlacementChange, SpaceError> {
+        let inventory = list_spaces()?;
+        let destination = resolve_desktop(&inventory, placement)?;
+        if window_placement(window_id).is_ok_and(|current| current.space_id == destination.id) {
+            return Ok(PlacementChange::AlreadyPlaced);
+        }
+
+        let api = SkyLight::load()?;
+        let move_windows = api.move_windows_to_managed_space.ok_or_else(|| {
+            SpaceError::ApiUnavailable(
+                "SkyLight does not expose managed-Space window movement".to_string(),
+            )
+        })?;
+        let connection = unsafe { (api.main_connection_id)() };
+        let window_number = CFNumber::from(i64::from(window_id));
+        let windows = CFArray::from_CFTypes(&[window_number]);
+        unsafe {
+            move_windows(connection, windows.as_concrete_TypeRef(), destination.id);
+        }
+        Ok(PlacementChange::Moved)
     }
 
     fn skylight_window_space(window_id: u32) -> Result<u64, SpaceError> {
@@ -453,6 +525,27 @@ mod macos {
             .collect()
     }
 
+    pub(super) fn resolve_desktop<'a>(
+        inventory: &'a SpaceInventory,
+        placement: &DesktopPlacement,
+    ) -> Result<&'a DesktopSpace, SpaceError> {
+        let display = inventory
+            .displays
+            .iter()
+            .find(|display| display.uuid == placement.display_uuid)
+            .ok_or_else(|| SpaceError::DisplayUnavailable {
+                display_uuid: placement.display_uuid.clone(),
+            })?;
+        display
+            .desktops
+            .iter()
+            .find(|desktop| desktop.ordinal == placement.desktop_ordinal)
+            .ok_or_else(|| SpaceError::DesktopUnavailable {
+                display_uuid: placement.display_uuid.clone(),
+                desktop_ordinal: placement.desktop_ordinal,
+            })
+    }
+
     unsafe fn symbol(handle: *mut c_void, name: &CStr) -> Result<*mut c_void, SpaceError> {
         let pointer = unsafe { dlsym(handle, name.as_ptr()) };
         if pointer.is_null() {
@@ -509,5 +602,62 @@ mod tests {
                 DesktopSpace { id: 87, ordinal: 2 },
             ]
         );
+    }
+
+    #[test]
+    fn resolves_a_persisted_display_and_desktop_ordinal() {
+        let inventory = SpaceInventory {
+            displays: vec![DisplaySpaces {
+                uuid: "Main".to_string(),
+                current_space_id: 42,
+                desktops: vec![
+                    DesktopSpace { id: 42, ordinal: 1 },
+                    DesktopSpace { id: 87, ordinal: 2 },
+                ],
+            }],
+        };
+
+        let desktop = macos::resolve_desktop(
+            &inventory,
+            &DesktopPlacement {
+                display_uuid: "Main".to_string(),
+                desktop_ordinal: 2,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(desktop.id, 87);
+    }
+
+    #[test]
+    fn reports_a_missing_display_separately_from_a_missing_desktop() {
+        let inventory = SpaceInventory {
+            displays: vec![DisplaySpaces {
+                uuid: "Main".to_string(),
+                current_space_id: 42,
+                desktops: vec![DesktopSpace { id: 42, ordinal: 1 }],
+            }],
+        };
+
+        assert!(matches!(
+            macos::resolve_desktop(
+                &inventory,
+                &DesktopPlacement {
+                    display_uuid: "External".to_string(),
+                    desktop_ordinal: 1,
+                }
+            ),
+            Err(SpaceError::DisplayUnavailable { .. })
+        ));
+        assert!(matches!(
+            macos::resolve_desktop(
+                &inventory,
+                &DesktopPlacement {
+                    display_uuid: "Main".to_string(),
+                    desktop_ordinal: 3,
+                }
+            ),
+            Err(SpaceError::DesktopUnavailable { .. })
+        ));
     }
 }

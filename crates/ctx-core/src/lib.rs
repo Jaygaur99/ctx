@@ -25,8 +25,8 @@ pub use recovery::{
 pub use runtime::{RuntimeError, RuntimeState};
 pub use snapshot::{SnapshotWindowReport, snapshot_workspace};
 pub use spaces::{
-    DesktopSpace, DisplaySpaces, SpaceError, SpaceInventory, WindowPlacement,
-    capture_desktop_placement, list_spaces, window_placement,
+    DesktopSpace, DisplaySpaces, PlacementChange, SpaceError, SpaceInventory, WindowPlacement,
+    capture_desktop_placement, list_spaces, move_window_to_desktop, window_placement,
 };
 pub use switcher::{SwitchError, switch_workspace};
 pub use windows::{
