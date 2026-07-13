@@ -503,6 +503,11 @@ mod tests {
         ) -> Result<PlacementChange, SpaceError> {
             self.events.push("place");
             if self.placement_error {
+                if placement.display_uuid == "Missing" {
+                    return Err(SpaceError::DisplayUnavailable {
+                        display_uuid: placement.display_uuid.clone(),
+                    });
+                }
                 return Err(SpaceError::ApiUnavailable("simulated failure".to_string()));
             }
             if self
@@ -718,7 +723,7 @@ mod tests {
             config.workspace("target").unwrap().windows[0]
                 .placement_warning
                 .as_deref()
-                .is_some_and(|warning| warning.contains("simulated failure"))
+                .is_some_and(|warning| warning.contains("display 'Missing' is unavailable"))
         );
     }
 

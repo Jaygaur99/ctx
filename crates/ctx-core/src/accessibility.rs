@@ -1,6 +1,9 @@
 use thiserror::Error;
 
-use crate::{WindowBounds, WindowInfo, list_all_windows};
+use crate::{
+    SpaceError, WindowBounds, WindowInfo, capture_desktop_placement, current_desktop_placement,
+    list_all_windows, move_window_to_desktop,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct WindowActionFailure {
@@ -38,6 +41,13 @@ pub enum AccessibilityError {
 
     #[error("window {id} does not expose a project or document path")]
     DocumentUnavailable { id: u32 },
+
+    #[error("window {id} could not be staged on the current Desktop: {source}")]
+    DesktopStaging {
+        id: u32,
+        #[source]
+        source: SpaceError,
+    },
 
     #[cfg(target_os = "macos")]
     #[error("macOS accessibility operation failed for window {id}: {source}")]
@@ -141,21 +151,22 @@ pub fn close_windows(saved_windows: &[WindowInfo]) -> Result<(), AccessibilityEr
             .iter()
             .find(|window| window.id == saved.id && window.owner == saved.owner)
             .ok_or(AccessibilityError::WindowMissing { id: saved.id })?;
-        let window = accessibility_window(current, true)?;
-        let close_button_attribute =
-            AXAttribute::<CFType>::new(&CFString::from_static_string(kAXCloseButtonAttribute));
-        let close_button = window
-            .attribute(&close_button_attribute)
-            .ok()
-            .and_then(|value| value.downcast::<AXUIElement>())
-            .ok_or(AccessibilityError::CloseUnavailable { id: saved.id })?;
+        with_accessible_window(current, true, false, |window| {
+            let close_button_attribute =
+                AXAttribute::<CFType>::new(&CFString::from_static_string(kAXCloseButtonAttribute));
+            let close_button = window
+                .attribute(&close_button_attribute)
+                .ok()
+                .and_then(|value| value.downcast::<AXUIElement>())
+                .ok_or(AccessibilityError::CloseUnavailable { id: saved.id })?;
 
-        close_button
-            .press()
-            .map_err(|source| AccessibilityError::Operation {
-                id: saved.id,
-                source,
-            })?;
+            close_button
+                .press()
+                .map_err(|source| AccessibilityError::Operation {
+                    id: saved.id,
+                    source,
+                })
+        })?;
     }
 
     Ok(())
@@ -185,37 +196,84 @@ fn set_window_minimized(current: &WindowInfo, minimized: bool) -> Result<(), Acc
     use accessibility::{action::AXUIElementActions, attribute::AXAttribute};
     use core_foundation::boolean::CFBoolean;
 
-    let window = match accessibility_window(current, !minimized) {
-        Ok(window) => window,
-        Err(AccessibilityError::WindowUnresolved { .. }) if minimized => {
-            accessibility_window(current, true)?
-        }
-        Err(error) => return Err(error),
-    };
-    window
-        .set_attribute(
-            &AXAttribute::minimized(),
-            if minimized {
-                CFBoolean::true_value()
-            } else {
-                CFBoolean::false_value()
-            },
-        )
-        .map_err(|source| AccessibilityError::Operation {
-            id: current.id,
-            source,
-        })?;
-
-    if !minimized {
+    with_accessible_window(current, !minimized, true, |window| {
         window
-            .raise()
+            .set_attribute(
+                &AXAttribute::minimized(),
+                if minimized {
+                    CFBoolean::true_value()
+                } else {
+                    CFBoolean::false_value()
+                },
+            )
             .map_err(|source| AccessibilityError::Operation {
                 id: current.id,
                 source,
             })?;
+
+        if !minimized {
+            window
+                .raise()
+                .map_err(|source| AccessibilityError::Operation {
+                    id: current.id,
+                    source,
+                })?;
+        }
+
+        Ok(())
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn with_accessible_window<T>(
+    current: &WindowInfo,
+    activate_application: bool,
+    restore_placement: bool,
+    action: impl Fn(&accessibility::ui_element::AXUIElement) -> Result<T, AccessibilityError>,
+) -> Result<T, AccessibilityError> {
+    match accessibility_window(current, activate_application) {
+        Ok(window) => return action(&window),
+        Err(AccessibilityError::WindowUnresolved { .. }) => {}
+        Err(error) => return Err(error),
     }
 
-    Ok(())
+    let original = capture_desktop_placement(current.id).map_err(|source| {
+        AccessibilityError::DesktopStaging {
+            id: current.id,
+            source,
+        }
+    })?;
+    let staging = current_desktop_placement(&original.display_uuid).map_err(|source| {
+        AccessibilityError::DesktopStaging {
+            id: current.id,
+            source,
+        }
+    })?;
+    if staging == original {
+        return accessibility_window(current, true).and_then(|window| action(&window));
+    }
+
+    move_window_to_desktop(current.id, &staging).map_err(|source| {
+        AccessibilityError::DesktopStaging {
+            id: current.id,
+            source,
+        }
+    })?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let result = accessibility_window(current, true).and_then(|window| action(&window));
+    if restore_placement {
+        let restored = move_window_to_desktop(current.id, &original).map_err(|source| {
+            AccessibilityError::DesktopStaging {
+                id: current.id,
+                source,
+            }
+        });
+        if result.is_ok() {
+            restored?;
+        }
+    }
+    result
 }
 
 #[cfg(target_os = "macos")]

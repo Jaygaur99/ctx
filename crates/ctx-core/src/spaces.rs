@@ -79,6 +79,30 @@ pub fn capture_desktop_placement(window_id: u32) -> Result<DesktopPlacement, Spa
     })
 }
 
+pub fn current_desktop_placement(display_uuid: &str) -> Result<DesktopPlacement, SpaceError> {
+    let inventory = list_spaces()?;
+    let display = inventory
+        .displays
+        .iter()
+        .find(|display| display.uuid == display_uuid)
+        .ok_or_else(|| SpaceError::DisplayUnavailable {
+            display_uuid: display_uuid.to_string(),
+        })?;
+    let desktop = display
+        .desktops
+        .iter()
+        .find(|desktop| desktop.id == display.current_space_id)
+        .ok_or_else(|| {
+            SpaceError::InvalidMetadata(format!(
+                "display '{display_uuid}' has no current user Desktop"
+            ))
+        })?;
+    Ok(DesktopPlacement {
+        display_uuid: display_uuid.to_string(),
+        desktop_ordinal: desktop.ordinal,
+    })
+}
+
 #[cfg(target_os = "macos")]
 pub fn move_window_to_desktop(
     window_id: u32,
@@ -108,7 +132,7 @@ mod macos {
         mem,
         process::Command,
         ptr,
-        sync::{Mutex, MutexGuard},
+        sync::{Mutex, MutexGuard, Once},
         thread,
         time::{Duration, Instant},
     };
@@ -122,6 +146,7 @@ mod macos {
         array::CFArray,
         base::{CFType, TCFType},
         number::CFNumber,
+        runloop::CFRunLoop,
         string::CFString,
     };
     use core_foundation_sys::{
@@ -129,6 +154,7 @@ mod macos {
         base::CFRelease,
         dictionary::{CFDictionaryGetValue, CFDictionaryRef},
         number::{CFNumberGetValue, CFNumberRef, kCFNumberSInt64Type},
+        runloop::kCFRunLoopDefaultMode,
         string::CFStringRef,
         uuid::{CFUUIDCreateFromString, CFUUIDRef},
     };
@@ -141,7 +167,11 @@ mod macos {
     const RTLD_LAZY: c_int = 0x1;
     const RTLD_LOCAL: c_int = 0x4;
     const SKYLIGHT_PATH: &CStr = c"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight";
+    const SKYLIGHT_IMAGE_PATH: &CStr =
+        c"/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight";
+    const BRIDGED_MOVE_SYMBOL: &CStr = c"__ZL54SLSPerformAsynchronousBridgedWindowManagementOperationP47SLSAsynchronousBridgedWindowManagementOperation";
     static SKYLIGHT_LOCK: Mutex<()> = Mutex::new(());
+    static APPKIT_INIT: Once = Once::new();
 
     type MainConnectionId = unsafe extern "C" fn() -> c_int;
     type CopyManagedDisplaySpaces = unsafe extern "C" fn(c_int) -> CFArrayRef;
@@ -149,6 +179,8 @@ mod macos {
     type SpaceGetType = unsafe extern "C" fn(c_int, u64) -> c_int;
     type CopySpacesForWindows = unsafe extern "C" fn(c_int, c_int, CFArrayRef) -> CFArrayRef;
     type MoveWindowsToManagedSpace = unsafe extern "C" fn(c_int, CFArrayRef, u64);
+    type PerformBridgedWindowManagementOperation =
+        unsafe extern "C" fn(*mut objc::runtime::Object) -> i64;
     type SpaceSetCompatId = unsafe extern "C" fn(c_int, u64, c_int) -> c_int;
     type SetWindowListWorkspace = unsafe extern "C" fn(c_int, *const u32, c_int, c_int) -> c_int;
     type CoreDockSendNotification = unsafe extern "C" fn(CFStringRef, c_int) -> c_int;
@@ -158,6 +190,67 @@ mod macos {
         fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
         fn dlerror() -> *const c_char;
+        fn _dyld_image_count() -> u32;
+        fn _dyld_get_image_name(index: u32) -> *const c_char;
+        fn _dyld_get_image_vmaddr_slide(index: u32) -> isize;
+        fn _dyld_get_image_header(index: u32) -> *const MachHeader64;
+    }
+
+    #[link(name = "AppKit", kind = "framework")]
+    unsafe extern "C" {
+        fn NSApplicationLoad() -> bool;
+    }
+
+    #[repr(C)]
+    struct MachHeader64 {
+        magic: u32,
+        cpu_type: i32,
+        cpu_subtype: i32,
+        file_type: u32,
+        command_count: u32,
+        command_size: u32,
+        flags: u32,
+        reserved: u32,
+    }
+
+    #[repr(C)]
+    struct LoadCommand {
+        command: u32,
+        size: u32,
+    }
+
+    #[repr(C)]
+    struct SegmentCommand64 {
+        command: u32,
+        size: u32,
+        name: [c_char; 16],
+        address: u64,
+        memory_size: u64,
+        file_offset: u64,
+        file_size: u64,
+        maximum_protection: i32,
+        initial_protection: i32,
+        section_count: u32,
+        flags: u32,
+    }
+
+    #[repr(C)]
+    struct SymbolTableCommand {
+        command: u32,
+        size: u32,
+        symbol_offset: u32,
+        symbol_count: u32,
+        string_offset: u32,
+        string_size: u32,
+    }
+
+    #[repr(C)]
+    struct Symbol64 {
+        string_index: u32,
+        symbol_type: u8,
+        section: u8,
+        description: u16,
+        value: u64,
     }
 
     struct SkyLight {
@@ -168,6 +261,8 @@ mod macos {
         space_get_type: SpaceGetType,
         copy_spaces_for_windows: CopySpacesForWindows,
         move_windows_to_managed_space: Option<MoveWindowsToManagedSpace>,
+        perform_bridged_window_management_operation:
+            Option<PerformBridgedWindowManagementOperation>,
         space_set_compat_id: Option<SpaceSetCompatId>,
         set_window_list_workspace: Option<SetWindowListWorkspace>,
         core_dock_send_notification: Option<CoreDockSendNotification>,
@@ -177,6 +272,9 @@ mod macos {
     impl SkyLight {
         fn load() -> Result<Self, SpaceError> {
             unsafe {
+                APPKIT_INIT.call_once(|| {
+                    let _ = NSApplicationLoad();
+                });
                 let handle = dlopen(SKYLIGHT_PATH.as_ptr(), RTLD_LAZY | RTLD_LOCAL);
                 if handle.is_null() {
                     return Err(SpaceError::ApiUnavailable(last_dl_error()));
@@ -228,6 +326,17 @@ mod macos {
                     .map(|pointer| {
                         mem::transmute::<*mut c_void, MoveWindowsToManagedSpace>(pointer)
                     }),
+                    perform_bridged_window_management_operation: symbol(
+                        handle,
+                        c"SLSPerformAsynchronousBridgedWindowManagementOperation",
+                    )
+                    .ok()
+                    .or_else(|| macho_find_symbol(SKYLIGHT_IMAGE_PATH, BRIDGED_MOVE_SYMBOL))
+                    .map(|pointer| {
+                        mem::transmute::<*mut c_void, PerformBridgedWindowManagementOperation>(
+                            pointer,
+                        )
+                    }),
                     space_set_compat_id: symbol_any(
                         handle,
                         &[c"CGSSpaceSetCompatID", c"SLSSpaceSetCompatID"],
@@ -242,6 +351,7 @@ mod macos {
                     .map(|pointer| mem::transmute::<*mut c_void, SetWindowListWorkspace>(pointer)),
                     core_dock_send_notification: symbol(handle, c"CoreDockSendNotification")
                         .ok()
+                        .or_else(|| macho_find_symbol_any_image(c"_CoreDockSendNotification"))
                         .map(|pointer| {
                             mem::transmute::<*mut c_void, CoreDockSendNotification>(pointer)
                         }),
@@ -314,32 +424,110 @@ mod macos {
             return Ok(PlacementChange::AlreadyPlaced);
         }
 
-        let _guard = skylight_lock();
-        let api = SkyLight::load()?;
-        let connection = unsafe { (api.main_connection_id)() };
-        let window_number = CFNumber::from(i64::from(window_id));
-        let windows = CFArray::from_CFTypes(&[window_number]);
-        if uses_compat_workspace_move()
-            && let (Some(set_compat), Some(set_workspace)) =
-                (api.space_set_compat_id, api.set_window_list_workspace)
+        let mut used_legacy_move = false;
         {
-            const CTX_COMPAT_ID: c_int = 0x6374_7821;
-            unsafe {
-                set_compat(connection, destination.id, CTX_COMPAT_ID);
-                set_workspace(connection, &window_id, 1, CTX_COMPAT_ID);
-                set_compat(connection, destination.id, 0);
+            let _guard = skylight_lock();
+            let api = SkyLight::load()?;
+            let connection = unsafe { (api.main_connection_id)() };
+            let window_number = CFNumber::from(i64::from(window_id));
+            let windows = CFArray::from_CFTypes(&[window_number]);
+            if let Some(perform) = api.perform_bridged_window_management_operation {
+                perform_bridged_window_move(perform, &windows, destination.id)?;
+            } else if uses_compat_workspace_move()
+                && let (Some(set_compat), Some(set_workspace)) =
+                    (api.space_set_compat_id, api.set_window_list_workspace)
+            {
+                const CTX_COMPAT_ID: c_int = 0x6374_7821;
+                unsafe {
+                    set_compat(connection, destination.id, CTX_COMPAT_ID);
+                    set_workspace(connection, &window_id, 1, CTX_COMPAT_ID);
+                    set_compat(connection, destination.id, 0);
+                }
+            } else if let Some(move_windows) = api.move_windows_to_managed_space {
+                used_legacy_move = true;
+                unsafe {
+                    move_windows(connection, windows.as_concrete_TypeRef(), destination.id);
+                }
+            } else {
+                return Err(SpaceError::ApiUnavailable(
+                    "SkyLight does not expose a compatible managed-Space window movement API"
+                        .to_string(),
+                ));
             }
-        } else if let Some(move_windows) = api.move_windows_to_managed_space {
+        }
+        if let Err(primary_error) = wait_for_window_space(window_id, destination.id) {
+            if used_legacy_move {
+                return Err(primary_error);
+            }
+            let guard = skylight_lock();
+            let api = SkyLight::load()?;
+            let move_windows = api.move_windows_to_managed_space.ok_or(primary_error)?;
+            let connection = unsafe { (api.main_connection_id)() };
+            let window_number = CFNumber::from(i64::from(window_id));
+            let windows = CFArray::from_CFTypes(&[window_number]);
             unsafe {
                 move_windows(connection, windows.as_concrete_TypeRef(), destination.id);
             }
-        } else {
-            return Err(SpaceError::ApiUnavailable(
-                "SkyLight does not expose a compatible managed-Space window movement API"
-                    .to_string(),
-            ));
+            drop(guard);
+            wait_for_window_space(window_id, destination.id)?;
         }
         Ok(PlacementChange::Moved)
+    }
+
+    fn perform_bridged_window_move(
+        perform: PerformBridgedWindowManagementOperation,
+        windows: &CFArray<CFNumber>,
+        destination_space_id: u64,
+    ) -> Result<(), SpaceError> {
+        use objc::{msg_send, runtime::Class, sel, sel_impl};
+
+        let class =
+            Class::get("SLSBridgedMoveWindowsToManagedSpaceOperation").ok_or_else(|| {
+                SpaceError::ApiUnavailable(
+                    "SkyLight bridged window movement class is unavailable".to_string(),
+                )
+            })?;
+        unsafe {
+            let operation: *mut objc::runtime::Object = msg_send![class, alloc];
+            if operation.is_null() {
+                return Err(SpaceError::ApiUnavailable(
+                    "could not allocate a bridged window movement operation".to_string(),
+                ));
+            }
+            let operation: *mut objc::runtime::Object = msg_send![
+                operation,
+                initWithWindows: windows.as_concrete_TypeRef()
+                spaceID: destination_space_id
+            ];
+            if operation.is_null() {
+                return Err(SpaceError::ApiUnavailable(
+                    "could not initialize a bridged window movement operation".to_string(),
+                ));
+            }
+            perform(operation);
+            let _: () = msg_send![operation, release];
+        }
+        Ok(())
+    }
+
+    fn wait_for_window_space(window_id: u32, expected_space_id: u64) -> Result<(), SpaceError> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if skylight_window_space(window_id).is_ok_and(|space_id| space_id == expected_space_id)
+            {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(SpaceError::InvalidMetadata(format!(
+                    "window {window_id} did not move to Space {expected_space_id}"
+                )));
+            }
+            CFRunLoop::run_in_mode(
+                unsafe { kCFRunLoopDefaultMode },
+                Duration::from_millis(50),
+                true,
+            );
+        }
     }
 
     fn uses_compat_workspace_move() -> bool {
@@ -792,6 +980,85 @@ mod macos {
 
     pub(super) fn missing_desktop_count(existing: usize, target_ordinal: usize) -> usize {
         target_ordinal.saturating_sub(existing)
+    }
+
+    unsafe fn macho_find_symbol(image_path: &CStr, symbol_name: &CStr) -> Option<*mut c_void> {
+        for index in 0..unsafe { _dyld_image_count() } {
+            let name = unsafe { _dyld_get_image_name(index) };
+            if !name.is_null() && unsafe { CStr::from_ptr(name) } == image_path {
+                return unsafe { macho_find_symbol_in_image(index, symbol_name) };
+            }
+        }
+        None
+    }
+
+    unsafe fn macho_find_symbol_any_image(symbol_name: &CStr) -> Option<*mut c_void> {
+        for index in 0..unsafe { _dyld_image_count() } {
+            if let Some(pointer) = unsafe { macho_find_symbol_in_image(index, symbol_name) } {
+                return Some(pointer);
+            }
+        }
+        None
+    }
+
+    unsafe fn macho_find_symbol_in_image(
+        image_index: u32,
+        symbol_name: &CStr,
+    ) -> Option<*mut c_void> {
+        const LC_SYMTAB: u32 = 0x2;
+        const LC_SEGMENT_64: u32 = 0x19;
+
+        let header = unsafe { _dyld_get_image_header(image_index) };
+        let slide = unsafe { _dyld_get_image_vmaddr_slide(image_index) };
+        if header.is_null() {
+            return None;
+        }
+
+        let mut linkedit = None;
+        let mut symbol_table = None;
+        let mut command_address = header.cast::<u8>().addr() + mem::size_of::<MachHeader64>();
+        for _ in 0..unsafe { (*header).command_count } {
+            let command = command_address as *const LoadCommand;
+            if command.is_null()
+                || unsafe { (*command).size } < mem::size_of::<LoadCommand>() as u32
+            {
+                return None;
+            }
+            match unsafe { (*command).command } {
+                LC_SEGMENT_64 => {
+                    let segment = command.cast::<SegmentCommand64>();
+                    let name = unsafe { &(*segment).name };
+                    let bytes = name.map(|value| value as u8);
+                    if bytes.starts_with(b"__LINKEDIT\0") {
+                        linkedit = Some(segment);
+                    }
+                }
+                LC_SYMTAB => symbol_table = Some(command.cast::<SymbolTableCommand>()),
+                _ => {}
+            }
+            command_address = command_address.checked_add(unsafe { (*command).size } as usize)?;
+        }
+
+        let linkedit = unsafe { &*linkedit? };
+        let symbol_table = unsafe { &*symbol_table? };
+        let linkedit_base = linkedit.address.checked_sub(linkedit.file_offset)? as usize;
+        let slid_base = linkedit_base.checked_add_signed(slide)?;
+        let strings = slid_base.checked_add(symbol_table.string_offset as usize)? as *const c_char;
+        let symbols =
+            slid_base.checked_add(symbol_table.symbol_offset as usize)? as *const Symbol64;
+
+        for index in 0..symbol_table.symbol_count as usize {
+            let entry = unsafe { &*symbols.add(index) };
+            if entry.string_index >= symbol_table.string_size {
+                continue;
+            }
+            let name = unsafe { CStr::from_ptr(strings.add(entry.string_index as usize)) };
+            if name == symbol_name {
+                let address = (entry.value as usize).checked_add_signed(slide)?;
+                return Some(address as *mut c_void);
+            }
+        }
+        None
     }
 
     unsafe fn symbol(handle: *mut c_void, name: &CStr) -> Result<*mut c_void, SpaceError> {

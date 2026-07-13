@@ -61,17 +61,21 @@ Smoke gate: VS Code, Firefox, and Warp recover onto their recorded existing Desk
 
 Smoke gate: with one Desktop present and a window recorded on Desktop 3, Ctx creates two Desktops and restores the window onto Desktop 3.
 
+Verification fixture: with three Desktops present, targeting Desktop 4 created exactly one additional Desktop and moved Warp to it. The pure `missing_desktop_count(1, 3)` test verifies that a Desktop 1 to Desktop 3 gap creates exactly two Desktops.
+
 ## Step 5: End-to-End Acceptance
 
-- [ ] Test VS Code, Firefox, and Warp across at least three Desktops.
-- [ ] Close all three app windows, switch away, then recover the workspace and verify app context plus placement.
-- [ ] Repeat the switch and verify there are no duplicates.
-- [ ] Test a missing display and document the fallback behavior.
-- [ ] Run `cargo test --workspace`.
-- [ ] Run `cargo clippy --workspace --all-targets -- -D warnings`.
-- [ ] Run `cargo build --workspace`.
-- [ ] Run `graphify update .`.
-- [ ] Commit each completed step as its own checkpoint.
+- [x] Test VS Code, Firefox, and Warp across at least three Desktops.
+- [x] Close all three app windows, switch away, then recover the workspace and verify app context plus placement.
+- [x] Repeat the switch and verify there are no duplicates.
+- [x] Test a missing display and document the fallback behavior.
+- [x] Run `cargo test --workspace`.
+- [x] Run `cargo clippy --workspace --all-targets -- -D warnings`.
+- [x] Run `cargo build --workspace`.
+- [x] Run `graphify update .`.
+- [x] Commit each completed step as its own checkpoint.
+
+Acceptance fixture: `placement-e2e` recovered Code, Firefox, and Warp as new window IDs 5113, 5110, and 5129 on Desktops 1, 2, and 3. A repeated switch preserved all three IDs. If the recorded display is disconnected, Ctx leaves the window where macOS placed it, completes the ordinary workspace switch, and persists an explicit `display '<uuid>' is unavailable` placement warning; it does not guess another display.
 
 ## Explicitly Deferred
 
