@@ -43,14 +43,14 @@ Git automation, services, pause notes, custom URL schemes, per-workspace browser
 
 ## Step 4: Verification
 
-- [ ] Run `cargo fmt --all`.
-- [ ] Run `cargo test --workspace`.
-- [ ] Run `cargo clippy --workspace --all-targets -- -D warnings`.
-- [ ] Run `cargo build --workspace`.
-- [ ] Run `git diff --check`.
-- [ ] Run `graphify update .`.
-- [ ] Complete a disposable localhost Computer Use smoke test without leaving config or runtime markers.
-- [ ] Commit the model, CLI, switch integration, and final verification as checkpoints.
+- [x] Run `cargo fmt --all`.
+- [x] Run `cargo test --workspace`.
+- [x] Run `cargo clippy --workspace --all-targets -- -D warnings`.
+- [x] Run `cargo build --workspace`.
+- [x] Run `git diff --check`.
+- [x] Run `graphify update .`.
+- [x] Complete a disposable localhost Computer Use smoke test without leaving config or runtime markers.
+- [x] Commit the model, CLI, switch integration, and final verification as checkpoints.
 
 ## Acceptance
 
