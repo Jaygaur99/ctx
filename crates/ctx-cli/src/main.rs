@@ -4,11 +4,15 @@ mod error;
 use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
 
 use clap::Parser;
-use cli::{Cli, Commands, WindowFilters};
+use cli::{Cli, Commands, UrlCommands, WindowFilters};
 use ctx_core::{
-    AppPaths, Config, RuntimeState, WindowInfo, WindowResolution, WindowState, WindowStatus,
-    close_windows, inspect_windows, list_all_windows, list_windows, minimize_windows_best_effort,
-    reconcile_windows, resolve_window, switch_workspace,
+    AppPaths, Config, GenericAppAdapter, RuntimeState, SystemUrlOpener, UrlError, UrlLaunchReport,
+    WindowInfo, WindowResolution, WindowState, WindowStatus, WorkspaceUrlState, WorkspaceUrlStatus,
+    add_urls_to_workspace, capture_desktop_placement, close_windows, current_boot_id,
+    default_recovery_registry, inspect_windows, launch_workspace_urls, list_all_windows,
+    list_spaces, list_windows, minimize_windows_best_effort, reconcile_windows,
+    remove_urls_from_workspace, resolve_window, save_switch_transaction, snapshot_workspace,
+    switch_workspace, window_placement, workspace_url_statuses,
 };
 use error::CliError;
 use serde_json::{Value, json};
@@ -45,8 +49,11 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Init => init_config(config, json),
         Commands::List { filters } => list_window_command(config, false, filters, json),
         Commands::ListAll { filters } => list_window_command(config, true, filters, json),
+        Commands::Spaces { window_id } => show_spaces(window_id, json),
         Commands::Add { name, window_ids } => add_workspace(config, name, window_ids, json),
         Commands::Switch { name } => switch_to_workspace(config, name, json),
+        Commands::Snapshot { name } => snapshot(config, name, json),
+        Commands::Url { command } => url_command(config, command, json),
         Commands::Status => show_status(config, json),
         Commands::HideAll => hide_all(config, json),
         Commands::Ignore { window_ids } => ignore_windows(config, window_ids, json),
@@ -55,6 +62,322 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Remove { name } => remove_workspace(config, name, json),
         Commands::Close { name } => close_workspace(config, name, json),
     }
+}
+
+fn show_spaces(window_id: Option<u32>, json_output: bool) -> Result<(), CliError> {
+    if let Some(window_id) = window_id {
+        let placement = window_placement(window_id)?;
+        if json_output {
+            print_json(serde_json::to_value(placement)?)?;
+        } else {
+            println!(
+                "Window {}: Desktop {} on display {} (space {})",
+                placement.window_id,
+                placement.desktop_ordinal,
+                placement.display_uuid,
+                placement.space_id
+            );
+        }
+        return Ok(());
+    }
+    let inventory = list_spaces()?;
+    if json_output {
+        print_json(serde_json::to_value(inventory)?)?;
+    } else {
+        for display in inventory.displays {
+            println!("Display {}", display.uuid);
+            for desktop in display.desktops {
+                let current = if desktop.id == display.current_space_id {
+                    " *"
+                } else {
+                    ""
+                };
+                println!(
+                    "  Desktop {} (space {}){current}",
+                    desktop.ordinal, desktop.id
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn snapshot(
+    config_override: Option<PathBuf>,
+    name: Option<String>,
+    json_output: bool,
+) -> Result<(), CliError> {
+    let app_paths = AppPaths::discover()?;
+    let config_path = config_override.unwrap_or(app_paths.config_file);
+    let mut config = Config::load(&config_path)?;
+    let state = RuntimeState::load(app_paths.runtime_file)?;
+    let name = name
+        .or(state.active_workspace)
+        .ok_or(CliError::NoActiveWorkspace)?;
+    let workspace = config
+        .workspaces
+        .get_mut(&name)
+        .ok_or_else(|| CliError::WorkspaceMissing { name: name.clone() })?;
+    let report = snapshot_workspace(
+        workspace,
+        &list_all_windows()?,
+        &default_recovery_registry(),
+        &GenericAppAdapter,
+    )?;
+    config.save(&config_path)?;
+
+    if json_output {
+        print_json(json!({
+            "workspace": name,
+            "windows": report,
+            "config": config_path,
+        }))?;
+    } else {
+        let captured = report.iter().filter(|window| window.captured).count();
+        let degraded = report
+            .iter()
+            .filter(|window| window.warning.is_some() || window.placement_warning.is_some())
+            .count();
+        println!(
+            "Snapshotted {captured}/{} windows in workspace '{name}'.",
+            report.len()
+        );
+        for window in report {
+            if let Some(warning) = window.warning {
+                println!(
+                    "Warning for window {} ({}): {warning}",
+                    window.id, window.application
+                );
+            }
+            if let Some(warning) = window.placement_warning {
+                println!(
+                    "Placement warning for window {} ({}): {warning}",
+                    window.id, window.application
+                );
+            }
+        }
+        if degraded > 0 {
+            println!(
+                "Snapshot is degraded for {degraded} window(s); do not close them if exact context recovery is required."
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn url_command(
+    config_override: Option<PathBuf>,
+    command: UrlCommands,
+    json_output: bool,
+) -> Result<(), CliError> {
+    match command {
+        UrlCommands::Add { workspace, urls } => {
+            add_workspace_urls(config_override, workspace, urls, json_output)
+        }
+        UrlCommands::Remove { workspace, urls } => {
+            remove_workspace_urls(config_override, workspace, urls, json_output)
+        }
+        UrlCommands::List { workspace } => {
+            list_workspace_urls(config_override, workspace, json_output)
+        }
+        UrlCommands::Open { workspace, force } => {
+            open_workspace_urls(config_override, workspace, force, json_output)
+        }
+    }
+}
+
+fn add_workspace_urls(
+    config_override: Option<PathBuf>,
+    workspace_name: String,
+    urls: Vec<String>,
+    json_output: bool,
+) -> Result<(), CliError> {
+    let config_path = resolve_config_path(config_override)?;
+    let mut config = Config::load(&config_path)?;
+    let workspace =
+        config
+            .workspaces
+            .get_mut(&workspace_name)
+            .ok_or_else(|| CliError::WorkspaceMissing {
+                name: workspace_name.clone(),
+            })?;
+    let update = add_urls_to_workspace(workspace, &urls)?;
+    let configured = workspace.urls.clone();
+    config.save(&config_path)?;
+
+    if json_output {
+        print_json(json!({
+            "workspace": workspace_name,
+            "added": update.added,
+            "already_present": update.already_present,
+            "urls": configured,
+            "config": config_path,
+        }))?;
+    } else {
+        for url in &update.added {
+            println!("Added URL to '{workspace_name}': {url}");
+        }
+        for url in &update.already_present {
+            println!("URL already configured for '{workspace_name}': {url}");
+        }
+    }
+    Ok(())
+}
+
+fn remove_workspace_urls(
+    config_override: Option<PathBuf>,
+    workspace_name: String,
+    urls: Vec<String>,
+    json_output: bool,
+) -> Result<(), CliError> {
+    let app_paths = AppPaths::discover()?;
+    let config_path = config_override.unwrap_or(app_paths.config_file);
+    let mut config = Config::load(&config_path)?;
+    let mut state = RuntimeState::load(&app_paths.runtime_file)?;
+    let workspace =
+        config
+            .workspaces
+            .get_mut(&workspace_name)
+            .ok_or_else(|| CliError::WorkspaceMissing {
+                name: workspace_name.clone(),
+            })?;
+    let requested = match remove_urls_from_workspace(workspace, &urls) {
+        Ok(removed) => removed,
+        Err(UrlError::NotConfigured { url }) => {
+            return Err(CliError::UrlNotConfigured {
+                workspace: workspace_name,
+                url,
+            });
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let remaining = workspace.urls.clone();
+    for url in &requested {
+        state.clear_workspace_url(&workspace_name, url);
+    }
+    save_switch_transaction(&config, &config_path, &state, &app_paths.runtime_file)?;
+
+    if json_output {
+        print_json(json!({
+            "workspace": workspace_name,
+            "removed": requested,
+            "urls": remaining,
+            "config": config_path,
+        }))?;
+    } else {
+        for url in requested {
+            println!("Removed URL from '{workspace_name}': {url}");
+        }
+    }
+    Ok(())
+}
+
+fn list_workspace_urls(
+    config_override: Option<PathBuf>,
+    workspace_name: Option<String>,
+    json_output: bool,
+) -> Result<(), CliError> {
+    let app_paths = AppPaths::discover()?;
+    let config_path = config_override.unwrap_or(app_paths.config_file);
+    let config = Config::load(config_path)?;
+    let state = RuntimeState::load(app_paths.runtime_file)?;
+    let boot_id = current_boot_id()?;
+    let names: Vec<_> = match workspace_name {
+        Some(name) => {
+            if !config.workspaces.contains_key(&name) {
+                return Err(CliError::WorkspaceMissing { name });
+            }
+            vec![name]
+        }
+        None => config.workspaces.keys().cloned().collect(),
+    };
+
+    if json_output {
+        let workspaces: Vec<_> = names
+            .iter()
+            .map(|name| {
+                let workspace = config.workspace(name).expect("workspace name validated");
+                json!({
+                    "name": name,
+                    "urls": workspace.urls,
+                    "url_statuses": workspace_url_statuses(name, workspace, &state, &boot_id),
+                })
+            })
+            .collect();
+        print_json(json!({ "workspaces": workspaces }))?;
+    } else {
+        for name in names {
+            let workspace = config.workspace(&name).expect("workspace name validated");
+            println!("Workspace: {name}");
+            print_url_statuses(&workspace_url_statuses(&name, workspace, &state, &boot_id));
+        }
+    }
+    Ok(())
+}
+
+fn open_workspace_urls(
+    config_override: Option<PathBuf>,
+    workspace_name: Option<String>,
+    force: bool,
+    json_output: bool,
+) -> Result<(), CliError> {
+    let app_paths = AppPaths::discover()?;
+    let config_path = config_override.unwrap_or(app_paths.config_file);
+    let config = Config::load(config_path)?;
+    let mut state = RuntimeState::load(&app_paths.runtime_file)?;
+    let workspace_name = workspace_name
+        .or_else(|| state.active_workspace.clone())
+        .ok_or(CliError::NoActiveWorkspace)?;
+    let workspace =
+        config
+            .workspace(&workspace_name)
+            .ok_or_else(|| CliError::WorkspaceMissing {
+                name: workspace_name.clone(),
+            })?;
+    let boot_id = current_boot_id()?;
+    let mut opener = SystemUrlOpener;
+    let report = launch_workspace_urls(
+        &workspace_name,
+        workspace,
+        &mut state,
+        &boot_id,
+        force,
+        &mut opener,
+    );
+    state.save(app_paths.runtime_file)?;
+    print_url_launch_report(&report, json_output)?;
+    if report.has_failures() {
+        return Err(CliError::UrlLaunchPartial {
+            failed: report.failed.len(),
+        });
+    }
+    Ok(())
+}
+
+fn print_url_launch_report(report: &UrlLaunchReport, json_output: bool) -> Result<(), CliError> {
+    if json_output {
+        return print_json(serde_json::to_value(report)?);
+    }
+    for url in &report.opened {
+        println!("Opened URL for '{}': {url}", report.workspace);
+    }
+    for url in &report.already_opened {
+        println!("Already opened this boot for '{}': {url}", report.workspace);
+    }
+    for url in &report.recovery_managed {
+        println!(
+            "Managed by browser recovery for '{}': {url}",
+            report.workspace
+        );
+    }
+    for failure in &report.failed {
+        println!(
+            "Failed to open URL for '{}': {} ({})",
+            report.workspace, failure.url, failure.error
+        );
+    }
+    Ok(())
 }
 
 fn hide_all(config_override: Option<PathBuf>, json_output: bool) -> Result<(), CliError> {
@@ -228,6 +551,8 @@ fn list_window_command(
                     "id": window.id,
                     "pid": window.pid,
                     "application": window.owner,
+                    "bundle_id": window.bundle_id,
+                    "application_path": window.application_path,
                     "title": window.title,
                     "bounds": window.bounds,
                     "assigned_to": assignments.get(&window.id).cloned().unwrap_or_default(),
@@ -280,7 +605,15 @@ fn add_workspace(
             .ok_or(CliError::WindowNotSelectable { id })?;
 
         if !selected.iter().any(|selected| selected.id == id) {
-            selected.push(window.clone());
+            let mut window = window.clone();
+            match capture_desktop_placement(window.id) {
+                Ok(placement) => window.placement = Some(placement),
+                Err(error) => {
+                    window.placement_warning =
+                        Some(format!("Desktop placement capture failed: {error}"));
+                }
+            }
+            selected.push(window);
         }
     }
 
@@ -310,14 +643,17 @@ fn switch_to_workspace(
     let mut config = Config::load(&config_path)?;
     let mut state = RuntimeState::load(&app_paths.runtime_file)?;
 
-    switch_workspace(&mut config, &mut state, &name)?;
-    config.save(&config_path)?;
-    state.save(app_paths.runtime_file)?;
+    let report = switch_workspace(&mut config, &mut state, &name)?;
+    save_switch_transaction(&config, &config_path, &state, app_paths.runtime_file)?;
 
     if json_output {
-        print_json(json!({ "active_workspace": name }))?;
+        print_json(json!({
+            "active_workspace": name,
+            "urls": report.urls,
+        }))?;
     } else {
         println!("Switched to workspace '{name}'");
+        print_url_launch_report(&report.urls, false)?;
     }
 
     Ok(())
@@ -328,6 +664,7 @@ fn show_status(config_override: Option<PathBuf>, json_output: bool) -> Result<()
     let config_path = config_override.unwrap_or(app_paths.config_file);
     let config = Config::load(&config_path)?;
     let state = RuntimeState::load(app_paths.runtime_file)?;
+    let boot_id = current_boot_id()?;
     let all_windows = list_all_windows()?;
     let visible_windows = list_windows()?;
 
@@ -339,6 +676,8 @@ fn show_status(config_override: Option<PathBuf>, json_output: bool) -> Result<()
                 json!({
                     "name": name,
                     "active": state.active_workspace.as_deref() == Some(name),
+                    "urls": workspace.urls,
+                    "url_statuses": workspace_url_statuses(name, workspace, &state, &boot_id),
                     "windows": inspect_windows(&workspace.windows, &all_windows, &visible_windows),
                 })
             })
@@ -368,6 +707,7 @@ fn show_status(config_override: Option<PathBuf>, json_output: bool) -> Result<()
                 &all_windows,
                 &visible_windows,
             ));
+            print_url_statuses(&workspace_url_statuses(name, workspace, &state, &boot_id));
         }
     }
 
@@ -383,6 +723,7 @@ fn show_workspace(
     let config_path = config_override.unwrap_or(app_paths.config_file);
     let config = Config::load(config_path)?;
     let state = RuntimeState::load(app_paths.runtime_file)?;
+    let boot_id = current_boot_id()?;
     let workspace = config
         .workspace(&name)
         .ok_or_else(|| CliError::WorkspaceMissing { name: name.clone() })?;
@@ -396,12 +737,14 @@ fn show_workspace(
             "path": workspace.path,
             "services": workspace.services,
             "urls": workspace.urls,
+            "url_statuses": workspace_url_statuses(&name, workspace, &state, &boot_id),
             "windows": statuses,
         }))?;
     } else {
         println!("Workspace: {name}");
         println!("Active: {active}");
         print_window_statuses(&statuses);
+        print_url_statuses(&workspace_url_statuses(&name, workspace, &state, &boot_id));
     }
 
     Ok(())
@@ -418,12 +761,11 @@ fn remove_workspace(
     let mut state = RuntimeState::load(&app_paths.runtime_file)?;
 
     config.remove_workspace(&name)?;
-    config.save(&config_path)?;
-
     if state.active_workspace.as_deref() == Some(&name) {
         state.active_workspace = None;
-        state.save(app_paths.runtime_file)?;
     }
+    state.clear_workspace_urls(&name);
+    save_switch_transaction(&config, &config_path, &state, &app_paths.runtime_file)?;
 
     if json_output {
         print_json(json!({ "removed_workspace": name }))?;
@@ -523,15 +865,63 @@ fn ensure_windows_resolved(workspace: &str, statuses: &[WindowStatus]) -> Result
 fn print_window_statuses(statuses: &[WindowStatus]) {
     for status in statuses {
         println!(
-            "    {:<10} {:<10} {:<24} {}",
+            "    {:<10} {:<10} {:<12} {:<24} {}",
             status
                 .resolved_id
                 .map(|id| id.to_string())
                 .unwrap_or_else(|| status.saved_id.to_string()),
             window_state_label(status.state),
+            recovery_label(status),
             status.owner,
             status.title.as_deref().unwrap_or("<untitled>")
         );
+        if let Some(warning) = &status.recovery_warning {
+            println!("      recovery warning: {warning}");
+        }
+        if let Some(placement) = &status.placement {
+            println!(
+                "      placement: Desktop {} on display {}",
+                placement.desktop_ordinal, placement.display_uuid
+            );
+        }
+        if let Some(warning) = &status.placement_warning {
+            println!("      placement warning: {warning}");
+        }
+    }
+}
+
+fn print_url_statuses(statuses: &[WorkspaceUrlStatus]) {
+    if statuses.is_empty() {
+        return;
+    }
+    println!("    URLs:");
+    for status in statuses {
+        println!("      {:<17} {}", url_state_label(status.state), status.url);
+        if let Some(error) = &status.error {
+            println!("        warning: {error}");
+        }
+    }
+}
+
+fn url_state_label(state: WorkspaceUrlState) -> &'static str {
+    match state {
+        WorkspaceUrlState::Pending => "pending",
+        WorkspaceUrlState::Opened => "opened",
+        WorkspaceUrlState::RecoveryManaged => "recovery-managed",
+        WorkspaceUrlState::Failed => "failed",
+    }
+}
+
+fn recovery_label(status: &WindowStatus) -> String {
+    match (
+        status.recovery_kind,
+        status.recovery_ready,
+        status.recovery_degraded,
+    ) {
+        (Some(kind), true, true) => format!("{}:degraded", kind.as_str()),
+        (Some(kind), true, false) => kind.as_str().to_string(),
+        (Some(kind), false, _) => format!("{}:not-ready", kind.as_str()),
+        (None, _, _) => "none".to_string(),
     }
 }
 

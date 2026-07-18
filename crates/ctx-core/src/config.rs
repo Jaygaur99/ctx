@@ -242,6 +242,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{BrowserTabState, RecoveryState};
     use tempfile::tempdir;
 
     const YAML: &str = r#"
@@ -292,6 +293,32 @@ workspaces:
         assert!(workspace.services.is_empty());
         assert!(workspace.urls.is_empty());
         assert!(config.ignored_windows.is_empty());
+    }
+
+    #[test]
+    fn old_window_yaml_loads_without_recovery_fields() {
+        let config = Config::from_yaml(
+            r#"
+version: 1
+workspaces:
+  legacy:
+    windows:
+      - id: 42
+        pid: 100
+        owner: Visual Studio Code
+        title: devLayout
+"#,
+        )
+        .unwrap();
+
+        let window = &config.workspace("legacy").unwrap().windows[0];
+        assert_eq!(window.id, 42);
+        assert!(window.bundle_id.is_none());
+        assert!(window.application_path.is_none());
+        assert!(window.recovery.is_none());
+        assert!(window.recovery_warning.is_none());
+        assert!(window.placement.is_none());
+        assert!(window.placement_warning.is_none());
     }
 
     #[test]
@@ -412,6 +439,15 @@ workspaces: {}
                     owner: "Visual Studio Code".to_string(),
                     title: Some("devLayout".to_string()),
                     bounds: None,
+                    bundle_id: None,
+                    application_path: None,
+                    recovery: None,
+                    recovery_warning: None,
+                    placement: Some(crate::DesktopPlacement {
+                        display_uuid: "Main".to_string(),
+                        desktop_ordinal: 2,
+                    }),
+                    placement_warning: Some("using saved display mapping".to_string()),
                 }],
             )
             .unwrap();
@@ -422,6 +458,54 @@ workspaces: {}
 
         assert_eq!(workspace.windows.len(), 1);
         assert_eq!(workspace.windows[0].id, 42);
+    }
+
+    #[test]
+    fn recovery_state_round_trips_through_yaml() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("workspaces.yaml");
+        let mut config = Config::from_yaml("version: 1\nworkspaces: {}\n").unwrap();
+
+        config
+            .add_workspace(
+                "research",
+                vec![WindowInfo {
+                    id: 7,
+                    pid: 200,
+                    owner: "Firefox".to_string(),
+                    title: Some("Ctx design".to_string()),
+                    bounds: None,
+                    bundle_id: Some("org.mozilla.firefox".to_string()),
+                    application_path: Some(PathBuf::from("/Applications/Firefox.app")),
+                    recovery: Some(RecoveryState::Browser {
+                        tabs: vec![BrowserTabState {
+                            url: "https://example.com/ctx".to_string(),
+                            title: Some("Ctx".to_string()),
+                        }],
+                        active_tab: Some(0),
+                    }),
+                    recovery_warning: Some("one pinned tab was unavailable".to_string()),
+                    placement: None,
+                    placement_warning: None,
+                }],
+            )
+            .unwrap();
+        config.save(&path).unwrap();
+
+        let loaded = Config::load(path).unwrap();
+        assert_eq!(loaded, config);
+    }
+
+    #[test]
+    fn failed_save_does_not_create_a_partial_config() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("missing/workspaces.yaml");
+        let config = Config::from_yaml("version: 1\nworkspaces: {}\n").unwrap();
+
+        let error = config.save(&path).unwrap_err();
+
+        assert!(matches!(error, ConfigError::Write { .. }));
+        assert!(!path.exists());
     }
 
     #[test]

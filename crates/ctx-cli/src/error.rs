@@ -1,6 +1,6 @@
 use ctx_core::{
-    AccessibilityError, ConfigError, PathsError, RuntimeError, SwitchError, WindowError,
-    WindowState,
+    AccessibilityError, ConfigError, PathsError, RecoveryError, RuntimeError, SpaceError,
+    SwitchError, SwitchPersistenceError, UrlError, WindowError, WindowState,
 };
 use thiserror::Error;
 
@@ -22,10 +22,22 @@ pub enum CliError {
     Accessibility(#[from] AccessibilityError),
 
     #[error(transparent)]
+    Recovery(#[from] RecoveryError),
+
+    #[error(transparent)]
+    Space(#[from] SpaceError),
+
+    #[error(transparent)]
     Switch(#[from] SwitchError),
 
     #[error(transparent)]
+    SwitchPersistence(#[from] SwitchPersistenceError),
+
+    #[error(transparent)]
     Json(#[from] serde_json::Error),
+
+    #[error(transparent)]
+    Url(#[from] UrlError),
 
     #[error("workspace '{name}' does not exist")]
     WorkspaceMissing { name: String },
@@ -45,6 +57,12 @@ pub enum CliError {
         id: u32,
         state: WindowState,
     },
+
+    #[error("URL '{url}' is not configured for workspace '{workspace}'")]
+    UrlNotConfigured { workspace: String, url: String },
+
+    #[error("{failed} workspace URL(s) could not be opened")]
+    UrlLaunchPartial { failed: usize },
 }
 
 impl CliError {
@@ -58,9 +76,16 @@ impl CliError {
             | Self::WindowNotSelectable { .. }
             | Self::WindowNotIgnored { .. }
             | Self::WindowUnavailable { .. }
+            | Self::UrlNotConfigured { .. }
             | Self::Config(ConfigError::WorkspaceMissing { .. })
             | Self::Config(ConfigError::WorkspaceAlreadyExists { .. })
-            | Self::Switch(SwitchError::WorkspaceMissing { .. }) => 2,
+            | Self::Switch(SwitchError::WorkspaceMissing { .. })
+            | Self::Url(
+                UrlError::Invalid { .. }
+                | UrlError::UnsupportedScheme { .. }
+                | UrlError::CredentialsNotAllowed { .. }
+                | UrlError::NotConfigured { .. },
+            ) => 2,
             _ => 1,
         }
     }
