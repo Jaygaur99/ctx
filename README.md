@@ -208,3 +208,5 @@ Issues and focused pull requests are welcome. Please keep platform behavior and 
 Ctx is available under the [MIT License](LICENSE).
 
 This is an independent personal project by Jay Kumar Gaur. It is unaffiliated with and not owned by microsasscapital or any other employer.
+
+It was designed and built with extensive use of AI-assisted development. Product direction, architectural decisions, review, testing, and releases are the author's responsibility.

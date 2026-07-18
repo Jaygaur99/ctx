@@ -105,31 +105,31 @@ Done when Firefox restores the URLs, order, and active tab of a closed tracked w
 
 ## Step 8 — Integrate Recovery Into `ctx switch`
 
-- [ ] Reconcile all target workspace windows before launching anything.
-- [ ] Recover only windows that are genuinely missing.
-- [ ] Launch once per saved resource and avoid duplicate app/window creation.
-- [ ] Poll every 250 ms for up to 20 seconds for restored windows.
-- [ ] Match restored windows using bundle ID and adapter context before title and geometry.
-- [ ] Stage recovery before minimizing the current workspace.
-- [ ] If any required target remains missing or ambiguous:
-  - Minimize windows created during the failed attempt.
-  - Restore focus to the current workspace.
-  - Do not change the active workspace in runtime state.
+- [x] Reconcile all target workspace windows before launching anything.
+- [x] Recover only windows that are genuinely missing.
+- [x] Launch once per saved resource and avoid duplicate app/window creation.
+- [x] Poll every 250 ms for up to 20 seconds for restored windows.
+- [x] Match restored windows using bundle ID and adapter context before title and geometry.
+- [x] Stage recovery before minimizing the current workspace.
+- [x] If any required target remains missing or ambiguous:
+  - [x] Minimize windows created during the failed attempt.
+  - [x] Restore focus to the current workspace.
+  - [x] Do not change the active workspace in runtime state.
 - [ ] When every target resolves:
-  - Minimize the previous workspace.
-  - Restore the target workspace.
-  - Refresh saved window fingerprints and IDs.
-  - Persist config and runtime state atomically.
-- [ ] Verify repeated switches are idempotent.
+  - [x] Minimize the previous workspace.
+  - [x] Restore the target workspace.
+  - [x] Refresh saved window fingerprints and IDs.
+  - [x] Persist config and runtime state as a coordinated transaction with rollback.
+- [x] Verify repeated switches are idempotent.
 
 Done when a partially failed recovery leaves the original workspace active, while a successful recovery switches cleanly without duplicates.
 
 ## Step 9 — Expose Recovery Diagnostics
 
-- [ ] Extend `ctx show` with recovery type, readiness, and last warning.
-- [ ] Extend `ctx status` with recovery readiness and warnings.
-- [ ] Add the same fields to JSON output.
-- [ ] Keep normal human-readable output compact when no warning exists.
+- [x] Extend `ctx show` with recovery type, readiness, and last warning.
+- [x] Extend `ctx status` with recovery readiness and warnings.
+- [x] Add the same fields to JSON output.
+- [x] Keep normal human-readable output compact when no warning exists.
 
 Done when users can tell whether every workspace window is recoverable before closing it.
 
@@ -142,18 +142,37 @@ Done when users can tell whether every workspace window is recoverable before cl
   - [x] Snapshot refreshes visible resources and preserves closed resources.
   - [x] Adapter failure produces a generic fallback and warning.
   - [x] Adapter selection uses bundle ID.
-- [ ] Orchestration tests with fake adapters/platform:
-  - Existing windows require no launch.
-  - Missing windows recover and refresh their IDs.
-  - Multiple windows from one app recover without duplication.
-  - Partial failure rolls back to the previous active workspace.
-  - Repeated recovery is idempotent.
+- [x] Orchestration tests with fake adapters/platform:
+  - [x] Existing windows require no launch.
+  - [x] Missing windows recover and refresh their IDs.
+  - [x] Multiple windows from one app recover without duplication.
+  - [x] Partial failure rolls back to the previous active workspace.
+  - [x] Repeated recovery is idempotent.
 - [x] Run formatting, tests, and strict Clippy for checkpoint `af071d8`.
 - [x] Run `graphify update .` after checkpoint `af071d8`.
 
 Done when all automated checks pass.
 
 ## Step 11 — End-to-End macOS Smoke Test
+
+First smoke attempt exposed and fixed the following issues in checkpoint `1fc8400`:
+
+- [x] Generic relaunch now sends a macOS reopen request when the app process is still running without windows.
+- [x] VS Code activates before Accessibility project capture.
+- [x] Firefox tab discovery skips web content and supports deeper browser-chrome nesting.
+- [x] Warp restores directories through verified `new_window` and `new_tab` URI actions instead of ignored launch-configuration URIs.
+- [x] Recovery matching accepts a single changed-title window with the expected bundle ID.
+- [x] Generic fallbacks are reported as degraded instead of looking like exact recovery.
+- [x] Activate running applications natively so existing windows can be restored across macOS Desktops (`b31681e`).
+- [x] Retry Accessibility window discovery while a macOS Desktop transition is settling (`1fb19de`).
+- [x] Match Firefox tabs by the stable `AXTabButton` subrole as well as its localized description (`1fb19de`).
+- [x] Capture a real VS Code + Firefox + Warp workspace with exact `editor`, `browser`, and `terminal` recovery state and no degraded warnings.
+- [x] Capture VS Code's workspace folder from its window-state metadata when diff/settings views do not expose `AXDocument` (`20736a5`).
+- [x] Preserve the last exact app-specific snapshot when a later capture attempt fails instead of overwriting it with generic recovery (`20736a5`).
+- [x] Wait for VS Code's saved workspace window instead of accepting its transient `Welcome` window by bundle ID (`2f064f1`).
+- [ ] Deferred: target a specific window when the same application has windows on different macOS Desktops. App activation currently exposes the last-active sibling window to Accessibility, so `ctx close` may not reach the requested window. Use a manual close for recovery smoke tests until Desktop/window targeting is implemented.
+- [ ] Save the modified VS Code buffer, close the three tracked windows, and complete the real relaunch smoke test.
+- [ ] Repeat the smoke test with project-bearing editor windows and all four supported applications.
 
 - [ ] Create a workspace containing VS Code, Antigravity, Warp, and Firefox.
 - [ ] Run `ctx snapshot <workspace>`.
