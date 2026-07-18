@@ -10,11 +10,11 @@ Git automation, services, pause notes, custom URL schemes, per-workspace browser
 
 - [x] Accept and normalize only credential-free HTTP and HTTPS URLs.
 - [x] Keep the existing `urls: [String]` YAML representation backward compatible.
-- [ ] Open pending URLs after window recovery and before target-window focus.
-- [ ] Launch each configured URL once per macOS boot unless explicitly forced.
-- [ ] Treat URLs already captured in Firefox recovery state as recovery-managed.
-- [ ] Retry failed launches without rolling back an otherwise successful workspace switch.
-- [ ] Never close, hide, position, or claim ownership of browser tabs opened from URL shortcuts.
+- [x] Open pending URLs after window recovery and before target-window focus.
+- [x] Launch each configured URL once per macOS boot unless explicitly forced.
+- [x] Treat URLs already captured in Firefox recovery state as recovery-managed.
+- [x] Retry failed launches without rolling back an otherwise successful workspace switch.
+- [x] Never close, hide, position, or claim ownership of browser tabs opened from URL shortcuts.
 
 ## Step 1: Model and Runtime State
 
@@ -25,21 +25,21 @@ Git automation, services, pause notes, custom URL schemes, per-workspace browser
 
 ## Step 2: CLI Management
 
-- [ ] Add `ctx url add <workspace> <url...>`.
-- [ ] Add `ctx url remove <workspace> <url...>`.
-- [ ] Add `ctx url list [workspace]`.
-- [ ] Add `ctx url open [workspace] [--force]`.
-- [ ] Include URL statuses in text and JSON `show`, `status`, and URL commands.
-- [ ] Make duplicate additions idempotent and removals atomic.
+- [x] Add `ctx url add <workspace> <url...>`.
+- [x] Add `ctx url remove <workspace> <url...>`.
+- [x] Add `ctx url list [workspace]`.
+- [x] Add `ctx url open [workspace] [--force]`.
+- [x] Include URL statuses in text and JSON `show`, `status`, and URL commands.
+- [x] Make duplicate additions idempotent and removals atomic.
 
 ## Step 3: Workspace Activation
 
-- [ ] Launch pending URLs through `/usr/bin/open` using the default browser.
-- [ ] Integrate URL launch after recovery matching and before final window restore/focus.
-- [ ] Persist only successful launches and retry failures later.
-- [ ] Suppress launches already covered by Firefox recovery tabs.
-- [ ] Keep switch successful when URL launching is partially degraded.
-- [ ] Clear matching runtime markers from `url remove` and workspace removal.
+- [x] Launch pending URLs through `/usr/bin/open` using the default browser.
+- [x] Integrate URL launch after recovery matching and before final window restore/focus.
+- [x] Persist only successful launches and retry failures later.
+- [x] Suppress launches already covered by Firefox recovery tabs.
+- [x] Keep switch successful when URL launching is partially degraded.
+- [x] Clear matching runtime markers from `url remove` and workspace removal.
 
 ## Step 4: Verification
 

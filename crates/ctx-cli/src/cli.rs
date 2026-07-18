@@ -63,6 +63,12 @@ pub enum Commands {
         name: Option<String>,
     },
 
+    /// Manage workspace URL launch shortcuts
+    Url {
+        #[command(subcommand)]
+        command: UrlCommands,
+    },
+
     /// Show the current workspace
     Status,
 
@@ -100,6 +106,45 @@ pub enum Commands {
     Close {
         /// Workspace name; defaults to the active workspace
         name: Option<String>,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq, Subcommand)]
+pub enum UrlCommands {
+    /// Add one or more URLs to a workspace
+    Add {
+        /// Workspace name
+        workspace: String,
+
+        /// HTTP or HTTPS URLs to add
+        #[arg(required = true, num_args = 1..)]
+        urls: Vec<String>,
+    },
+
+    /// Remove one or more URLs from a workspace
+    Remove {
+        /// Workspace name
+        workspace: String,
+
+        /// Configured URLs to remove
+        #[arg(required = true, num_args = 1..)]
+        urls: Vec<String>,
+    },
+
+    /// List configured URLs and their runtime state
+    List {
+        /// Workspace name; omit to list every workspace
+        workspace: Option<String>,
+    },
+
+    /// Open configured URLs in the macOS default browser
+    Open {
+        /// Workspace name; defaults to the active workspace
+        workspace: Option<String>,
+
+        /// Open every configured URL even if it was already launched this boot
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -226,6 +271,66 @@ mod tests {
                 name: Some("coding".to_string())
             }
         );
+    }
+
+    #[test]
+    fn parses_nested_url_commands() {
+        let add = Cli::try_parse_from([
+            "ctx",
+            "url",
+            "add",
+            "coding",
+            "https://example.com",
+            "http://localhost:3000",
+        ])
+        .unwrap();
+        let remove =
+            Cli::try_parse_from(["ctx", "url", "remove", "coding", "https://example.com"]).unwrap();
+        let list = Cli::try_parse_from(["ctx", "url", "list"]).unwrap();
+        let open = Cli::try_parse_from(["ctx", "url", "open", "coding", "--force"]).unwrap();
+
+        assert_eq!(
+            add.command,
+            Commands::Url {
+                command: UrlCommands::Add {
+                    workspace: "coding".to_string(),
+                    urls: vec![
+                        "https://example.com".to_string(),
+                        "http://localhost:3000".to_string(),
+                    ],
+                }
+            }
+        );
+        assert_eq!(
+            remove.command,
+            Commands::Url {
+                command: UrlCommands::Remove {
+                    workspace: "coding".to_string(),
+                    urls: vec!["https://example.com".to_string()],
+                }
+            }
+        );
+        assert_eq!(
+            list.command,
+            Commands::Url {
+                command: UrlCommands::List { workspace: None }
+            }
+        );
+        assert_eq!(
+            open.command,
+            Commands::Url {
+                command: UrlCommands::Open {
+                    workspace: Some("coding".to_string()),
+                    force: true,
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn url_add_and_remove_require_at_least_one_url() {
+        assert!(Cli::try_parse_from(["ctx", "url", "add", "coding"]).is_err());
+        assert!(Cli::try_parse_from(["ctx", "url", "remove", "coding"]).is_err());
     }
 
     #[test]

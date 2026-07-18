@@ -306,26 +306,35 @@ pub fn recovery_managed_urls(workspace: &Workspace) -> BTreeSet<String> {
 
 #[cfg(target_os = "macos")]
 pub fn current_boot_id() -> Result<String, UrlError> {
-    let output = Command::new("/usr/sbin/sysctl")
+    let who = Command::new("/usr/bin/who")
+        .arg("-b")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| UrlError::BootSession(error.to_string()))?;
+    let who_id = String::from_utf8_lossy(&who.stdout).trim().to_string();
+    if who.status.success() && !who_id.is_empty() {
+        return Ok(format!("who:{who_id}"));
+    }
+
+    let sysctl = Command::new("/usr/sbin/sysctl")
         .args(["-n", "kern.boottime"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
         .map_err(|error| UrlError::BootSession(error.to_string()))?;
-    if !output.status.success() {
-        return Err(UrlError::BootSession(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
+    let sysctl_id = String::from_utf8_lossy(&sysctl.stdout).trim().to_string();
+    if sysctl.status.success() && !sysctl_id.is_empty() {
+        return Ok(format!("sysctl:{sysctl_id}"));
     }
-    let boot_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if boot_id.is_empty() {
-        Err(UrlError::BootSession(
-            "sysctl returned an empty boot time".to_string(),
-        ))
-    } else {
-        Ok(boot_id)
-    }
+
+    let sysctl_error = String::from_utf8_lossy(&sysctl.stderr).trim().to_string();
+    let who_error = String::from_utf8_lossy(&who.stderr).trim().to_string();
+    Err(UrlError::BootSession(format!(
+        "sysctl failed ({sysctl_error}); who failed ({who_error})"
+    )))
 }
 
 #[cfg(not(target_os = "macos"))]
