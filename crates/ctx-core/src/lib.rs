@@ -30,11 +30,12 @@ pub use spaces::{
     capture_desktop_placement, current_desktop_placement, list_spaces, move_window_to_desktop,
     window_placement,
 };
-pub use switcher::{SwitchError, switch_workspace};
+pub use switcher::{SwitchError, SwitchReport, switch_workspace};
 pub use urls::{
-    SystemUrlOpener, UrlError, UrlLaunchFailure, UrlLaunchReport, UrlOpener, WorkspaceUrlState,
-    WorkspaceUrlStatus, current_boot_id, launch_workspace_urls, normalize_url, normalize_urls,
-    recovery_managed_urls, workspace_url_statuses,
+    ConfiguredUrlUpdate, SystemUrlOpener, UrlError, UrlLaunchFailure, UrlLaunchReport, UrlOpener,
+    WorkspaceUrlState, WorkspaceUrlStatus, add_urls_to_workspace, current_boot_id,
+    launch_workspace_urls, normalize_url, normalize_urls, recovery_managed_urls,
+    remove_urls_from_workspace, workspace_url_statuses,
 };
 pub use windows::{
     BrowserTabState, DesktopPlacement, RecoveryKind, RecoveryState, TerminalTabState, WindowBounds,

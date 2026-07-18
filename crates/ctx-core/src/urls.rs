@@ -29,6 +29,9 @@ pub enum UrlError {
     #[error("could not open URL '{url}': {message}")]
     Open { url: String, message: String },
 
+    #[error("URL '{url}' is not configured")]
+    NotConfigured { url: String },
+
     #[error("URL launching is only supported on macOS")]
     UnsupportedPlatform,
 }
@@ -54,6 +57,12 @@ pub struct WorkspaceUrlStatus {
 pub struct UrlLaunchFailure {
     pub url: String,
     pub error: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ConfiguredUrlUpdate {
+    pub added: Vec<String>,
+    pub already_present: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -132,6 +141,50 @@ pub fn normalize_urls(inputs: &[String]) -> Result<Vec<String>, UrlError> {
         }
     }
     Ok(normalized)
+}
+
+pub fn add_urls_to_workspace(
+    workspace: &mut Workspace,
+    inputs: &[String],
+) -> Result<ConfiguredUrlUpdate, UrlError> {
+    let normalized = normalize_urls(inputs)?;
+    let mut existing: BTreeSet<_> = workspace
+        .urls
+        .iter()
+        .filter_map(|url| normalize_url(url).ok())
+        .collect();
+    let mut update = ConfiguredUrlUpdate::default();
+    for url in normalized {
+        if existing.insert(url.clone()) {
+            workspace.urls.push(url.clone());
+            update.added.push(url);
+        } else {
+            update.already_present.push(url);
+        }
+    }
+    Ok(update)
+}
+
+pub fn remove_urls_from_workspace(
+    workspace: &mut Workspace,
+    inputs: &[String],
+) -> Result<Vec<String>, UrlError> {
+    let requested = normalize_urls(inputs)?;
+    let configured: BTreeSet<_> = workspace
+        .urls
+        .iter()
+        .filter_map(|url| normalize_url(url).ok())
+        .collect();
+    if let Some(url) = requested.iter().find(|url| !configured.contains(*url)) {
+        return Err(UrlError::NotConfigured { url: url.clone() });
+    }
+    let requested_set: BTreeSet<_> = requested.iter().cloned().collect();
+    workspace.urls.retain(|configured| {
+        normalize_url(configured)
+            .ok()
+            .is_none_or(|url| !requested_set.contains(&url))
+    });
+    Ok(requested)
 }
 
 pub fn workspace_url_statuses(
@@ -386,6 +439,64 @@ mod tests {
             normalize_url("https://user:secret@example.com"),
             Err(UrlError::CredentialsNotAllowed { .. })
         ));
+    }
+
+    #[test]
+    fn adding_urls_is_normalized_and_idempotent() {
+        let mut workspace = workspace(&["https://example.com/docs"]);
+
+        let update = add_urls_to_workspace(
+            &mut workspace,
+            &[
+                "HTTPS://EXAMPLE.COM/docs".to_string(),
+                "http://localhost:3000".to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(update.already_present, ["https://example.com/docs"]);
+        assert_eq!(update.added, ["http://localhost:3000/"]);
+        assert_eq!(workspace.urls.len(), 2);
+    }
+
+    #[test]
+    fn removal_is_atomic_when_any_url_is_missing() {
+        let mut workspace = workspace(&["https://example.com/one", "https://example.com/two"]);
+        let before = workspace.urls.clone();
+
+        let error = remove_urls_from_workspace(
+            &mut workspace,
+            &[
+                "https://example.com/one".to_string(),
+                "https://example.com/missing".to_string(),
+            ],
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, UrlError::NotConfigured { .. }));
+        assert_eq!(workspace.urls, before);
+    }
+
+    #[test]
+    fn removal_preserves_unrelated_and_invalid_legacy_entries() {
+        let mut workspace = workspace(&[
+            "https://example.com/one",
+            "https://example.com/two",
+            "legacy custom value",
+        ]);
+
+        let removed =
+            remove_urls_from_workspace(&mut workspace, &["https://example.com/one".to_string()])
+                .unwrap();
+
+        assert_eq!(removed, ["https://example.com/one"]);
+        assert_eq!(
+            workspace.urls,
+            [
+                "https://example.com/two".to_string(),
+                "legacy custom value".to_string(),
+            ]
+        );
     }
 
     #[test]

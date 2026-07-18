@@ -1,11 +1,13 @@
 use std::{collections::BTreeSet, thread, time::Duration};
 
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::{
     AccessibilityError, Config, DesktopPlacement, GenericAppAdapter, PlacementChange,
     RecoveryAdapter, RecoveryError, RecoveryRegistry, RecoveryState, RuntimeState, SpaceError,
-    WindowInfo, WindowResolution, WindowState, default_recovery_registry, list_all_windows,
+    UrlError, UrlLaunchReport, UrlOpener, WindowInfo, WindowResolution, WindowState,
+    current_boot_id, default_recovery_registry, launch_workspace_urls, list_all_windows,
     minimize_windows, minimize_windows_best_effort, move_window_to_desktop, reconcile_windows,
     resolve_window, restore_windows, windows::refresh_window_fingerprint,
 };
@@ -49,6 +51,11 @@ pub enum SwitchError {
     RecoveryTimedOut { workspace: String, ids: Vec<u32> },
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SwitchReport {
+    pub urls: UrlLaunchReport,
+}
+
 trait SwitchPlatform {
     fn list_windows(&mut self) -> Result<Vec<WindowInfo>, SwitchError>;
     fn minimize(&mut self, windows: &[WindowInfo]) -> Result<(), SwitchError>;
@@ -59,6 +66,8 @@ trait SwitchPlatform {
         window: &WindowInfo,
         placement: &DesktopPlacement,
     ) -> Result<PlacementChange, SpaceError>;
+    fn boot_id(&mut self) -> Result<String, UrlError>;
+    fn open_url(&mut self, url: &str) -> Result<(), UrlError>;
     fn wait(&mut self, duration: Duration);
 }
 
@@ -99,6 +108,15 @@ impl SwitchPlatform for MacOsSwitchPlatform {
         move_window_to_desktop(window.id, placement)
     }
 
+    fn boot_id(&mut self) -> Result<String, UrlError> {
+        current_boot_id()
+    }
+
+    fn open_url(&mut self, url: &str) -> Result<(), UrlError> {
+        let mut opener = crate::SystemUrlOpener;
+        opener.open(url)
+    }
+
     fn wait(&mut self, duration: Duration) {
         thread::sleep(duration);
     }
@@ -108,7 +126,7 @@ pub fn switch_workspace(
     config: &mut Config,
     state: &mut RuntimeState,
     target_name: &str,
-) -> Result<(), SwitchError> {
+) -> Result<SwitchReport, SwitchError> {
     switch_workspace_with(
         config,
         state,
@@ -126,7 +144,7 @@ fn switch_workspace_with(
     registry: &RecoveryRegistry,
     generic: &dyn RecoveryAdapter,
     platform: &mut dyn SwitchPlatform,
-) -> Result<(), SwitchError> {
+) -> Result<SwitchReport, SwitchError> {
     if !config.workspaces.contains_key(target_name) {
         return Err(SwitchError::WorkspaceMissing {
             name: target_name.to_string(),
@@ -237,14 +255,16 @@ fn switch_workspace_with(
     apply_desktop_placements(target, &after, platform);
     let target_windows = resolved_windows(&target.windows, &after);
     if previous_name.as_deref() == Some(target_name) {
+        let url_report = activate_workspace_urls(target_name, target, state, platform);
         platform.restore(&target_windows)?;
-        return Ok(());
+        return Ok(SwitchReport { urls: url_report });
     }
 
     if let Err(error) = platform.minimize(&previous_windows) {
         rollback_recovery(platform, &before_ids, &previous_windows);
         return Err(error);
     }
+    let url_report = activate_workspace_urls(target_name, target, state, platform);
     if let Err(error) = platform.restore(&target_windows) {
         platform.restore(&previous_windows).ok();
         rollback_recovery(platform, &before_ids, &previous_windows);
@@ -252,7 +272,52 @@ fn switch_workspace_with(
     }
 
     state.active_workspace = Some(target_name.to_string());
-    Ok(())
+    Ok(SwitchReport { urls: url_report })
+}
+
+struct PlatformUrlOpener<'a> {
+    platform: &'a mut dyn SwitchPlatform,
+}
+
+impl UrlOpener for PlatformUrlOpener<'_> {
+    fn open(&mut self, url: &str) -> Result<(), UrlError> {
+        self.platform.open_url(url)
+    }
+}
+
+fn activate_workspace_urls(
+    workspace_name: &str,
+    workspace: &crate::Workspace,
+    state: &mut RuntimeState,
+    platform: &mut dyn SwitchPlatform,
+) -> UrlLaunchReport {
+    if workspace.urls.is_empty() {
+        return UrlLaunchReport {
+            workspace: workspace_name.to_string(),
+            ..UrlLaunchReport::default()
+        };
+    }
+    let boot_id = match platform.boot_id() {
+        Ok(boot_id) => boot_id,
+        Err(error) => {
+            return UrlLaunchReport::system_failure(workspace_name, &workspace.urls, error);
+        }
+    };
+    let report = {
+        let mut opener = PlatformUrlOpener { platform };
+        launch_workspace_urls(
+            workspace_name,
+            workspace,
+            state,
+            &boot_id,
+            false,
+            &mut opener,
+        )
+    };
+    if !report.opened.is_empty() {
+        platform.wait(Duration::from_millis(750));
+    }
+    report
 }
 
 fn apply_desktop_placements(
@@ -398,7 +463,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{WindowBounds, Workspace};
+    use crate::{BrowserTabState, WindowBounds, Workspace};
 
     #[derive(Default)]
     struct FakeAdapter {
@@ -451,6 +516,8 @@ mod tests {
         restored: Vec<Vec<u32>>,
         placements: Vec<(u32, DesktopPlacement)>,
         placement_moves: Vec<(u32, DesktopPlacement)>,
+        opened_urls: Vec<String>,
+        url_failures: BTreeSet<String>,
         events: Vec<&'static str>,
         placement_error: bool,
     }
@@ -464,6 +531,8 @@ mod tests {
                 restored: Vec::new(),
                 placements: Vec::new(),
                 placement_moves: Vec::new(),
+                opened_urls: Vec::new(),
+                url_failures: BTreeSet::new(),
                 events: Vec::new(),
                 placement_error: false,
             }
@@ -522,6 +591,22 @@ mod tests {
             Ok(PlacementChange::Moved)
         }
 
+        fn boot_id(&mut self) -> Result<String, UrlError> {
+            Ok("test-boot".to_string())
+        }
+
+        fn open_url(&mut self, url: &str) -> Result<(), UrlError> {
+            self.events.push("url");
+            if self.url_failures.contains(url) {
+                return Err(UrlError::Open {
+                    url: url.to_string(),
+                    message: "simulated URL failure".to_string(),
+                });
+            }
+            self.opened_urls.push(url.to_string());
+            Ok(())
+        }
+
         fn wait(&mut self, _duration: Duration) {}
     }
 
@@ -564,6 +649,14 @@ mod tests {
             urls: Vec::new(),
             windows,
         }
+    }
+
+    fn set_target_urls(config: &mut Config, urls: &[&str]) {
+        config
+            .workspaces
+            .get_mut("target")
+            .expect("target workspace")
+            .urls = urls.iter().map(|url| (*url).to_string()).collect();
     }
 
     #[test]
@@ -818,6 +911,115 @@ mod tests {
 
         assert_eq!(*adapter.launches.lock().unwrap(), [2]);
         assert_eq!(state.active_workspace.as_deref(), Some("target"));
+    }
+
+    #[test]
+    fn launches_urls_after_recovery_and_before_target_restore() {
+        let saved = window(2, "target.app", "Target", true);
+        let recovered = window(99, "target.app", "Target", false);
+        let adapter = FakeAdapter::default();
+        let mut platform = FakePlatform::new(vec![Vec::new(), vec![recovered]]);
+        let mut config = config(Vec::new(), vec![saved]);
+        set_target_urls(&mut config, &["https://example.com/docs"]);
+        let mut state = RuntimeState::default();
+
+        let first = switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &adapter,
+            &mut platform,
+        )
+        .unwrap();
+        let second = switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &adapter,
+            &mut platform,
+        )
+        .unwrap();
+
+        assert_eq!(*adapter.launches.lock().unwrap(), [2]);
+        assert_eq!(config.workspace("target").unwrap().windows[0].id, 99);
+        assert_eq!(first.urls.opened, ["https://example.com/docs"]);
+        assert_eq!(second.urls.already_opened, ["https://example.com/docs"]);
+        assert_eq!(platform.opened_urls, ["https://example.com/docs"]);
+        assert_eq!(platform.events, ["url", "restore", "restore"]);
+    }
+
+    #[test]
+    fn partial_url_failure_does_not_block_workspace_switch_and_retries() {
+        let target = window(2, "target.app", "Target", false);
+        let mut platform = FakePlatform::new(vec![vec![target.clone()]]);
+        platform
+            .url_failures
+            .insert("https://failed.example/".to_string());
+        let mut config = config(Vec::new(), vec![target]);
+        set_target_urls(
+            &mut config,
+            &["https://ok.example", "https://failed.example"],
+        );
+        let mut state = RuntimeState::default();
+
+        let first = switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &FakeAdapter::default(),
+            &mut platform,
+        )
+        .unwrap();
+        platform.url_failures.clear();
+        let second = switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &FakeAdapter::default(),
+            &mut platform,
+        )
+        .unwrap();
+
+        assert_eq!(state.active_workspace.as_deref(), Some("target"));
+        assert_eq!(first.urls.opened, ["https://ok.example/"]);
+        assert_eq!(first.urls.failed.len(), 1);
+        assert_eq!(second.urls.already_opened, ["https://ok.example/"]);
+        assert_eq!(second.urls.opened, ["https://failed.example/"]);
+        assert_eq!(platform.restored, [vec![2], vec![2]]);
+    }
+
+    #[test]
+    fn firefox_recovery_managed_url_is_not_opened_again() {
+        let mut firefox = window(2, "org.mozilla.firefox", "Firefox", false);
+        firefox.recovery = Some(RecoveryState::Browser {
+            tabs: vec![BrowserTabState {
+                url: "https://example.com/docs".to_string(),
+                title: Some("Docs".to_string()),
+            }],
+            active_tab: Some(0),
+        });
+        let mut platform = FakePlatform::new(vec![vec![firefox.clone()]]);
+        let mut config = config(Vec::new(), vec![firefox]);
+        set_target_urls(&mut config, &["https://example.com/docs"]);
+        let mut state = RuntimeState::default();
+
+        let report = switch_workspace_with(
+            &mut config,
+            &mut state,
+            "target",
+            &RecoveryRegistry::new(),
+            &FakeAdapter::default(),
+            &mut platform,
+        )
+        .unwrap();
+
+        assert_eq!(report.urls.recovery_managed, ["https://example.com/docs"]);
+        assert!(platform.opened_urls.is_empty());
+        assert_eq!(platform.events, ["restore"]);
     }
 
     #[test]
