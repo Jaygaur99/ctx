@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  addWindowsToWorkspace,
-  getWindowCandidates,
-  getWindowPickerWorkspace,
-  hideWindowPicker,
-  normalizeCommandError,
-  onWindowPickerOpened,
-  showPopover,
-} from "./api";
-import type { CommandError, WindowCandidate, WindowPickerOverview } from "./types";
+import { addWindowsToWorkspace, getWindowCandidates, normalizeCommandError } from "./api";
+import type {
+  AddWindowsReport,
+  CommandError,
+  WindowCandidate,
+  WindowPickerOverview,
+} from "./types";
 
 function CandidateRow({
   candidate,
@@ -22,7 +19,7 @@ function CandidateRow({
   onToggle: (id: number) => void;
 }) {
   const assignment = candidate.already_in_workspace
-    ? "Already in this workspace"
+    ? "Already in this context"
     : candidate.assigned_to.length > 0
       ? `Also tracked in ${candidate.assigned_to.join(", ")}`
       : "Not tracked yet";
@@ -51,8 +48,15 @@ function CandidateRow({
   );
 }
 
-export default function WindowPicker() {
-  const [workspace, setWorkspace] = useState<string | null>(null);
+export default function WindowPicker({
+  workspace,
+  onClose,
+  onAdded,
+}: {
+  workspace: string;
+  onClose: () => void;
+  onAdded: (report: AddWindowsReport) => void;
+}) {
   const [overview, setOverview] = useState<WindowPickerOverview | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [query, setQuery] = useState("");
@@ -60,11 +64,11 @@ export default function WindowPicker() {
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const refresh = useCallback(async (name: string) => {
+  const refresh = useCallback(async () => {
     setRefreshing(true);
     setError(null);
     try {
-      setOverview(await getWindowCandidates(name));
+      setOverview(await getWindowCandidates(workspace));
       setSelected(new Set());
     } catch (cause) {
       setOverview(null);
@@ -72,43 +76,19 @@ export default function WindowPicker() {
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [workspace]);
 
   useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-
-    const open = (name: string) => {
-      if (disposed) return;
-      setWorkspace(name);
-      setQuery("");
-      void refresh(name);
-    };
-
-    void getWindowPickerWorkspace().then(open).catch(() => undefined);
-    void onWindowPickerOpened(open).then((cleanup) => {
-      if (disposed) cleanup();
-      else unlisten = cleanup;
-    });
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
+    void refresh();
   }, [refresh]);
-
-  const close = useCallback(async () => {
-    await hideWindowPicker().catch(() => undefined);
-    await showPopover().catch(() => undefined);
-  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !saving) void close();
+      if (event.key === "Escape" && !saving) onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [close, saving]);
+  }, [onClose, saving]);
 
   const candidates = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -148,12 +128,11 @@ export default function WindowPicker() {
   };
 
   const addSelected = async () => {
-    if (!workspace || selectedCount === 0) return;
+    if (selectedCount === 0) return;
     setSaving(true);
     setError(null);
     try {
-      await addWindowsToWorkspace(workspace, [...selected]);
-      await close();
+      onAdded(await addWindowsToWorkspace(workspace, [...selected]));
     } catch (cause) {
       setError(normalizeCommandError(cause));
     } finally {
@@ -162,16 +141,13 @@ export default function WindowPicker() {
   };
 
   return (
-    <main className="picker-shell">
-      <header className="picker-header">
+    <section className="sheet" role="dialog" aria-modal="true" aria-labelledby="window-picker-title">
+      <header className="sheet-header">
         <div>
-          <div className="brand-row">
-            <span className="brand-mark">C</span>
-            <h1>Add windows</h1>
-          </div>
-          <p>{workspace ? `Choose windows for ${workspace}` : "Choose a workspace from the Ctx menu"}</p>
+          <h2 id="window-picker-title">Add windows</h2>
+          <p>Choose windows for {workspace}</p>
         </div>
-        <button className="icon-button icon-button--close" aria-label="Close window picker" disabled={saving} onClick={() => void close()}>×</button>
+        <button className="icon-button icon-button--close" aria-label="Close window picker" disabled={saving} onClick={onClose}>×</button>
       </header>
 
       <div className="picker-toolbar">
@@ -180,30 +156,25 @@ export default function WindowPicker() {
           <input
             type="search"
             value={query}
-            placeholder="Filter by app, title, or workspace"
+            placeholder="Filter by app, title, or context"
             aria-label="Filter windows"
+            autoFocus
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <button
-          className="icon-button"
-          aria-label="Refresh windows"
-          disabled={!workspace || refreshing || saving}
-          onClick={() => workspace && void refresh(workspace)}
-        >
+        <button className="icon-button" aria-label="Refresh windows" disabled={refreshing || saving} onClick={() => void refresh()}>
           <span className={refreshing ? "spin" : ""}>↻</span>
         </button>
       </div>
 
-      <section className="picker-content" aria-live="polite">
+      <div className="picker-content" aria-live="polite">
         {error && (
           <div className={`banner banner--${error.code === "permission" ? "warning" : "danger"}`} role="alert">
             <strong>{error.code === "permission" ? "Permission required" : "Couldn’t update windows"}</strong>
             <p>{error.message}</p>
-            {workspace && <button className="text-button" onClick={() => void refresh(workspace)}>Try again</button>}
+            <button className="text-button" onClick={() => void refresh()}>Try again</button>
           </div>
         )}
-
         <div className="picker-list-heading">
           <span>{refreshing ? "Finding windows…" : `${candidates.length} window${candidates.length === 1 ? "" : "s"}`}</span>
           {selectable.length > 0 && (
@@ -212,7 +183,6 @@ export default function WindowPicker() {
             </button>
           )}
         </div>
-
         {!overview && refreshing && !error && <div className="picker-empty">Looking across all Desktops…</div>}
         {overview && candidates.length === 0 && (
           <div className="picker-empty">
@@ -231,7 +201,7 @@ export default function WindowPicker() {
             />
           ))}
         </div>
-      </section>
+      </div>
 
       <footer className="picker-footer">
         <div>
@@ -239,12 +209,12 @@ export default function WindowPicker() {
           <span>Desktop placement is captured automatically.</span>
         </div>
         <div className="picker-footer__actions">
-          <button className="button" disabled={saving} onClick={() => void close()}>Cancel</button>
-          <button className="button button--primary" disabled={!workspace || selectedCount === 0 || saving} onClick={() => void addSelected()}>
+          <button className="button" disabled={saving} onClick={onClose}>Cancel</button>
+          <button className="button button--primary" disabled={selectedCount === 0 || saving} onClick={() => void addSelected()}>
             {saving ? "Adding…" : addLabel}
           </button>
         </div>
       </footer>
-    </main>
+    </section>
   );
 }

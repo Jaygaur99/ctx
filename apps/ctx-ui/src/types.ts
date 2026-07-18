@@ -44,6 +44,16 @@ export interface AddWindowsReport {
   already_tracked: number[];
 }
 
+export interface CreateWorkspaceReport {
+  workspace: string;
+  config_path: string;
+}
+
+export interface DeleteWorkspacesReport {
+  deleted: string[];
+  active_workspace: string | null;
+}
+
 export interface WindowStatus {
   saved_id: number;
   resolved_id: number | null;

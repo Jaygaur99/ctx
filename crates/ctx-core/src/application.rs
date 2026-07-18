@@ -57,6 +57,18 @@ pub struct AddWindowsReport {
     pub already_tracked: Vec<u32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CreateWorkspaceReport {
+    pub workspace: String,
+    pub config_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeleteWorkspacesReport {
+    pub deleted: Vec<String>,
+    pub active_workspace: Option<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum CtxAppError {
     #[error(transparent)]
@@ -200,6 +212,48 @@ impl CtxApp {
         let windows = list_all_windows()?;
         self.add_windows_to_workspace_with(workspace, window_ids, &windows, |id| {
             capture_desktop_placement(id)
+        })
+    }
+
+    pub fn create_workspace(&self, name: &str) -> Result<CreateWorkspaceReport, CtxAppError> {
+        let mut config = Config::load(&self.config_path)?;
+        let state = RuntimeState::load(&self.runtime_path)?;
+        config.add_workspace(name, Vec::new())?;
+        save_switch_transaction(&config, &self.config_path, &state, &self.runtime_path)?;
+        Ok(CreateWorkspaceReport {
+            workspace: name.to_string(),
+            config_path: self.config_path.clone(),
+        })
+    }
+
+    pub fn delete_workspace(&self, name: &str) -> Result<DeleteWorkspacesReport, CtxAppError> {
+        let mut config = Config::load(&self.config_path)?;
+        let mut state = RuntimeState::load(&self.runtime_path)?;
+        config.remove_workspace(name)?;
+        if state.active_workspace.as_deref() == Some(name) {
+            state.active_workspace = None;
+        }
+        state.clear_workspace_urls(name);
+        save_switch_transaction(&config, &self.config_path, &state, &self.runtime_path)?;
+        Ok(DeleteWorkspacesReport {
+            deleted: vec![name.to_string()],
+            active_workspace: state.active_workspace,
+        })
+    }
+
+    pub fn delete_all_workspaces(&self) -> Result<DeleteWorkspacesReport, CtxAppError> {
+        let mut config = Config::load(&self.config_path)?;
+        let mut state = RuntimeState::load(&self.runtime_path)?;
+        let deleted: Vec<_> = config.workspaces.keys().cloned().collect();
+        config.workspaces.clear();
+        state.active_workspace = None;
+        for name in &deleted {
+            state.clear_workspace_urls(name);
+        }
+        save_switch_transaction(&config, &self.config_path, &state, &self.runtime_path)?;
+        Ok(DeleteWorkspacesReport {
+            deleted,
+            active_workspace: None,
         })
     }
 
@@ -740,5 +794,68 @@ mod tests {
                 .windows
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn create_and_delete_workspace_mutations_persist_runtime_cleanup() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("workspaces.yaml");
+        let runtime_path = directory.path().join("runtime.json");
+        Config::from_yaml("version: 1\nworkspaces: {}\n")
+            .unwrap()
+            .save(&config_path)
+            .unwrap();
+        let app = CtxApp::from_paths(&config_path, &runtime_path);
+
+        app.create_workspace("coding").unwrap();
+        assert!(
+            Config::load(&config_path)
+                .unwrap()
+                .workspace("coding")
+                .is_some()
+        );
+
+        let mut state = RuntimeState {
+            active_workspace: Some("coding".to_string()),
+            ..RuntimeState::default()
+        };
+        state.ensure_url_boot_session("boot");
+        state.mark_url_opened("coding", "https://example.com/");
+        state.save(&runtime_path).unwrap();
+
+        let report = app.delete_workspace("coding").unwrap();
+        assert_eq!(report.deleted, vec!["coding"]);
+        assert!(report.active_workspace.is_none());
+        assert!(Config::load(&config_path).unwrap().workspaces.is_empty());
+        let state = RuntimeState::load(&runtime_path).unwrap();
+        assert!(state.active_workspace.is_none());
+        assert!(state.url_session.opened.is_empty());
+    }
+
+    #[test]
+    fn delete_all_workspaces_clears_every_definition_and_runtime_marker() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("workspaces.yaml");
+        let runtime_path = directory.path().join("runtime.json");
+        Config::from_yaml("version: 1\nworkspaces:\n  coding: {}\n  research: {}\n")
+            .unwrap()
+            .save(&config_path)
+            .unwrap();
+        let mut state = RuntimeState {
+            active_workspace: Some("research".to_string()),
+            ..RuntimeState::default()
+        };
+        state.ensure_url_boot_session("boot");
+        state.mark_url_failed("research", "https://example.com/", "offline");
+        state.save(&runtime_path).unwrap();
+        let app = CtxApp::from_paths(&config_path, &runtime_path);
+
+        let report = app.delete_all_workspaces().unwrap();
+
+        assert_eq!(report.deleted, vec!["coding", "research"]);
+        assert!(Config::load(config_path).unwrap().workspaces.is_empty());
+        let state = RuntimeState::load(runtime_path).unwrap();
+        assert!(state.active_workspace.is_none());
+        assert!(state.url_session.failures.is_empty());
     }
 }

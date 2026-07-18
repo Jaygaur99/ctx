@@ -711,17 +711,7 @@ fn remove_workspace(
     name: String,
     json_output: bool,
 ) -> Result<(), CliError> {
-    let app_paths = AppPaths::discover()?;
-    let config_path = config_override.unwrap_or(app_paths.config_file);
-    let mut config = Config::load(&config_path)?;
-    let mut state = RuntimeState::load(&app_paths.runtime_file)?;
-
-    config.remove_workspace(&name)?;
-    if state.active_workspace.as_deref() == Some(&name) {
-        state.active_workspace = None;
-    }
-    state.clear_workspace_urls(&name);
-    save_switch_transaction(&config, &config_path, &state, &app_paths.runtime_file)?;
+    CtxApp::discover(config_override)?.delete_workspace(&name)?;
 
     if json_output {
         print_json(json!({ "removed_workspace": name }))?;

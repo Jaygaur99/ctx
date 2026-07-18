@@ -2,7 +2,7 @@
 
 ## Summary
 
-Build a macOS-only Tauri v2 menu-bar utility. Ctx has no conventional application window or Dock presence: clicking its status-item icon toggles a compact popover, while window-picker and future settings interfaces use temporary hidden panels.
+Build a macOS-only Tauri v2 menu-bar utility. Ctx has no conventional application window or Dock presence: clicking its status-item icon toggles a compact popover, with window picking and context management presented as sheets inside that popover.
 
 The UI depends directly on `ctx-core`; it never invokes or parses the CLI. React, TypeScript, Vite, and npm provide the popover frontend.
 
@@ -37,7 +37,7 @@ The UI depends directly on `ctx-core`; it never invokes or parses the CLI. React
 
 - [x] Add `apps/ctx-ui` with a Tauri Rust crate, React/TypeScript/Vite frontend, npm lockfile, and membership in the Cargo workspace.
 - [x] Pin Tauri dependencies to one v2 minor release and use built-in tray/window APIs.
-- [x] Configure one hidden, borderless, fixed 400×560 `popover` webview and one hidden temporary window-picker panel, both with no conventional main-window behavior.
+- [x] Configure one hidden, borderless, fixed 400×560 `popover` webview with no conventional main-window behavior.
 - [x] Set macOS activation policy to `Accessory` so Ctx has no Dock or application-switcher presence.
 - [x] Add a monochrome template status icon, active-workspace tooltip, and right-click Quit menu.
 - [x] Toggle and position the popover below the tray icon, clamped to the current monitor.
@@ -45,7 +45,7 @@ The UI depends directly on `ctx-core`; it never invokes or parses the CLI. React
 
 ## Step 3 — Implement the Thin Tauri Boundary
 
-- [x] Expose the overview/action commands plus thin window-picker context, candidate, and add-window commands.
+- [x] Expose the overview/action commands plus thin context-mutation, window-candidate, and add-window commands.
 - [x] Run core work off the UI thread and serialize Tauri-originated operations behind one gate.
 - [x] Load config/runtime from disk for every command.
 - [x] Return core DTOs unchanged and serialize errors as `{ code, message }`.
@@ -83,15 +83,25 @@ The UI depends directly on `ctx-core`; it never invokes or parses the CLI. React
 - [x] Add `ctx-core` DTOs and facade methods for live candidates, workspace assignments, and persisted window additions.
 - [x] Resolve candidates from fresh window discovery, exclude Ctx's own panels, prevent duplicates, reject stale selections transactionally, and capture Desktop placement best-effort.
 - [x] Add an “Add windows” action to every workspace card.
-- [x] Open a temporary hidden picker panel with search, refresh, multi-select, assignment state, keyboard dismissal, and accessible light/dark styling.
+- [x] Open an in-popover picker sheet with search, refresh, multi-select, assignment state, keyboard dismissal, and accessible light/dark styling.
 - [x] Serialize discovery and mutation through the existing Tauri operation gate and return to the refreshed menu-bar popover after completion.
 - [x] Add core and frontend coverage for assignments, idempotent persistence, stale selections, filtering, selection, and picker launch.
-- [ ] Run the new automated tests, builds, and macOS acceptance checks when the active user workflow permits.
+- [x] Run the new automated tests and production frontend build when the active user workflow permits.
+
+## Step 8 — Add Context Creation and Deletion
+
+- [x] Add transactional `ctx-core` APIs to create a context, delete one context, and delete all contexts while cleaning active/runtime URL state.
+- [x] Add top-level Create Context and Delete controls.
+- [x] Create contexts through a named sheet and proceed directly to the window picker.
+- [x] Delete one selected context without closing applications.
+- [x] Require an explicit second confirmation before deleting all contexts.
+- [x] Keep all management UI inside the menu-bar popover and serialize mutations through the existing operation gate.
+- [x] Add core and frontend coverage for creation, individual deletion, delete-all confirmation, and runtime cleanup.
 
 ## Assumptions and Deferred Work
 
 - macOS is the only supported UI platform.
 - The popover is technically a hidden webview window but behaves exclusively as a transient status-item popover.
 - Cross-process file locking is not added; existing atomic persistence remains in effect.
-- Workspace creation and metadata editing, settings, launch-at-login, `hideAll` controls, Git automation, services, pause notes, notifications, auto-update, and distribution/signing are later milestones.
-- The picker and future settings interfaces open as temporary panels and remain hidden unless explicitly requested.
+- Workspace metadata editing, settings, launch-at-login, `hideAll` controls, Git automation, services, pause notes, notifications, auto-update, and distribution/signing are later milestones.
+- Window picking and context management remain inside the transient menu-bar popover; future settings interfaces may use temporary panels.

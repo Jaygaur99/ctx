@@ -25,22 +25,6 @@
         "focus": true,
         "shadow": true,
         "skipTaskbar": true
-      },
-      {
-        "label": "window-picker",
-        "title": "Ctx — Add windows",
-        "width": 520,
-        "height": 640,
-        "visible": false,
-        "center": true,
-        "decorations": false,
-        "resizable": false,
-        "minimizable": false,
-        "maximizable": false,
-        "alwaysOnTop": true,
-        "focus": true,
-        "shadow": true,
-        "skipTaskbar": true
       }
     ],
     "security": {

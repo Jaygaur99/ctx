@@ -6,7 +6,7 @@ Ctx is a local-first macOS workspace switcher. Its Rust core tracks application 
 
 The Tauri UI is a menu-bar utility, not a conventional desktop window. While it is running, Ctx appears only as a status item in the macOS menu bar. Clicking the icon toggles a compact workspace popover; clicking elsewhere or pressing Escape hides it.
 
-The popover shows active, window, recovery, placement, and URL state and provides Switch, Open URLs, and Add windows actions. Add windows opens a temporary picker panel with live windows from every macOS Desktop; selecting windows captures their current Desktop placement and saves them to the chosen workspace. Continue to use the CLI to create workspaces or edit paths, URLs, services, and other workspace metadata.
+The popover shows active, window, recovery, placement, and URL state and provides Switch, Open URLs, and Add windows actions. Add windows opens an in-popover picker with live windows from every macOS Desktop; selecting windows captures their current Desktop placement and saves them to the chosen context. Top-level Create Context and Delete controls create empty contexts, delete one context, or delete all contexts with confirmation. Continue to use the CLI to edit paths, URLs, services, and other workspace metadata.
 
 ### Development
 

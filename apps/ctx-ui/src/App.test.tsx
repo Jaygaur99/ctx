@@ -1,16 +1,20 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { CtxOverview } from "./types";
 
 const api = vi.hoisted(() => ({
+  addWindowsToWorkspace: vi.fn(),
+  createWorkspace: vi.fn(),
+  deleteAllWorkspaces: vi.fn(),
+  deleteWorkspace: vi.fn(),
   getOverview: vi.fn(),
+  getWindowCandidates: vi.fn(),
   hidePopover: vi.fn(),
   onPopoverOpened: vi.fn(),
   openWorkspaceUrls: vi.fn(),
   quitCtx: vi.fn(),
   showPopover: vi.fn(),
-  showWindowPicker: vi.fn(),
   switchWorkspace: vi.fn(),
 }));
 
@@ -68,8 +72,11 @@ describe("Ctx popover", () => {
     api.getOverview.mockResolvedValue(overview);
     api.hidePopover.mockResolvedValue(undefined);
     api.showPopover.mockResolvedValue(undefined);
-    api.showWindowPicker.mockResolvedValue(undefined);
     api.onPopoverOpened.mockResolvedValue(() => undefined);
+    api.getWindowCandidates.mockResolvedValue({ workspace: "coding", windows: [] });
+    api.createWorkspace.mockResolvedValue({ workspace: "new-context", config_path: "/tmp/workspaces.yaml" });
+    api.deleteWorkspace.mockResolvedValue({ deleted: ["coding"], active_workspace: null });
+    api.deleteAllWorkspaces.mockResolvedValue({ deleted: ["coding", "research"], active_workspace: null });
     api.switchWorkspace.mockResolvedValue({
       urls: { workspace: "research", opened: [], already_opened: [], recovery_managed: [], failed: [] },
     });
@@ -116,12 +123,48 @@ describe("Ctx popover", () => {
     expect(await screen.findByText(/could not be opened/)).toBeInTheDocument();
   });
 
-  it("opens the temporary window picker for a workspace", async () => {
+  it("opens the in-popover window picker for a workspace", async () => {
     render(<App />);
     await screen.findByRole("heading", { name: "coding" });
 
     fireEvent.click(screen.getAllByRole("button", { name: /Add windows/ })[0]);
 
-    await waitFor(() => expect(api.showWindowPicker).toHaveBeenCalledWith("coding"));
+    expect(await screen.findByRole("dialog", { name: "Add windows" })).toBeInTheDocument();
+    await waitFor(() => expect(api.getWindowCandidates).toHaveBeenCalledWith("coding"));
+  });
+
+  it("creates a context from the top control and proceeds to window selection", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create context" }));
+    const dialog = screen.getByRole("dialog", { name: "Create context" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Context name" }), { target: { value: "new-context" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create context" }));
+
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("new-context"));
+    expect(await screen.findByRole("dialog", { name: "Add windows" })).toBeInTheDocument();
+  });
+
+  it("deletes one context from the top delete control", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete contexts" }));
+    fireEvent.click(screen.getByRole("button", { name: /Delete “coding”/ }));
+
+    await waitFor(() => expect(api.deleteWorkspace).toHaveBeenCalledWith("coding"));
+  });
+
+  it("requires a second confirmation before deleting all contexts", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete contexts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete all contexts" }));
+    expect(api.deleteAllWorkspaces).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete all contexts" }));
+
+    await waitFor(() => expect(api.deleteAllWorkspaces).toHaveBeenCalled());
   });
 });
