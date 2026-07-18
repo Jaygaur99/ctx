@@ -67,9 +67,17 @@ Completed checkpoint commits:
 - [ ] Integrate service stop/start and rollback into `ctx switch`.
 - [ ] Add `ctx logs <workspace> [service]`.
 
-## Deferred Recovery and Product Work
+## Recovery MVP
 
-- [ ] Add a VS Code adapter that recreates missing project windows with `code --new-window`.
+- [x] Add a VS Code adapter that recreates missing project windows with `code --new-window`.
+- [x] Add a Firefox adapter that recreates saved tabs without stealing focus or duplicating native session restore.
+- [x] Add a Warp adapter that recreates saved tabs and working directories without rerunning commands.
+- [x] Verify recovery and repeated-switch idempotence for VS Code, Firefox, and Warp.
+- [ ] Add Antigravity recovery after its project metadata can be captured reliably; excluded from the current MVP.
+
+## Deferred Product Work
+
+- [ ] Remember and restore each window's macOS Desktop/Space placement; tracked in `desktop-placement.md`.
 - [ ] Add a Chrome adapter that recreates missing URL windows.
 - [ ] Add permission-gated macOS integration tests for minimize, restore, switch, and close.
 - [ ] Add process lifecycle integration tests.

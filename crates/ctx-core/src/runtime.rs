@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -10,6 +11,27 @@ use thiserror::Error;
 pub struct RuntimeState {
     pub version: u32,
     pub active_workspace: Option<String>,
+
+    #[serde(default, skip_serializing_if = "UrlSessionState::is_empty")]
+    pub url_session: UrlSessionState,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UrlSessionState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_id: Option<String>,
+
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub opened: BTreeMap<String, BTreeSet<String>>,
+
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub failures: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+impl UrlSessionState {
+    pub fn is_empty(&self) -> bool {
+        self.boot_id.is_none() && self.opened.is_empty() && self.failures.is_empty()
+    }
 }
 
 impl Default for RuntimeState {
@@ -17,6 +39,7 @@ impl Default for RuntimeState {
         Self {
             version: 1,
             active_workspace: None,
+            url_session: UrlSessionState::default(),
         }
     }
 }
@@ -62,6 +85,72 @@ pub enum RuntimeError {
 }
 
 impl RuntimeState {
+    pub fn ensure_url_boot_session(&mut self, boot_id: &str) {
+        if self.url_session.boot_id.as_deref() != Some(boot_id) {
+            self.url_session = UrlSessionState {
+                boot_id: Some(boot_id.to_string()),
+                ..UrlSessionState::default()
+            };
+        }
+    }
+
+    pub fn url_was_opened(&self, boot_id: &str, workspace: &str, url: &str) -> bool {
+        self.url_session.boot_id.as_deref() == Some(boot_id)
+            && self
+                .url_session
+                .opened
+                .get(workspace)
+                .is_some_and(|urls| urls.contains(url))
+    }
+
+    pub fn url_failure(&self, boot_id: &str, workspace: &str, url: &str) -> Option<&str> {
+        (self.url_session.boot_id.as_deref() == Some(boot_id))
+            .then(|| self.url_session.failures.get(workspace)?.get(url))
+            .flatten()
+            .map(String::as_str)
+    }
+
+    pub fn mark_url_opened(&mut self, workspace: &str, url: &str) {
+        self.url_session
+            .opened
+            .entry(workspace.to_string())
+            .or_default()
+            .insert(url.to_string());
+        self.clear_url_failure(workspace, url);
+    }
+
+    pub fn mark_url_failed(&mut self, workspace: &str, url: &str, error: &str) {
+        self.url_session
+            .failures
+            .entry(workspace.to_string())
+            .or_default()
+            .insert(url.to_string(), error.to_string());
+    }
+
+    pub fn clear_url_failure(&mut self, workspace: &str, url: &str) {
+        if let Some(failures) = self.url_session.failures.get_mut(workspace) {
+            failures.remove(url);
+            if failures.is_empty() {
+                self.url_session.failures.remove(workspace);
+            }
+        }
+    }
+
+    pub fn clear_workspace_url(&mut self, workspace: &str, url: &str) {
+        if let Some(opened) = self.url_session.opened.get_mut(workspace) {
+            opened.remove(url);
+            if opened.is_empty() {
+                self.url_session.opened.remove(workspace);
+            }
+        }
+        self.clear_url_failure(workspace, url);
+    }
+
+    pub fn clear_workspace_urls(&mut self, workspace: &str) {
+        self.url_session.opened.remove(workspace);
+        self.url_session.failures.remove(workspace);
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self, RuntimeError> {
         let path = path.as_ref();
         let json = match fs::read_to_string(path) {
@@ -136,6 +225,7 @@ mod tests {
         let state = RuntimeState {
             version: 1,
             active_workspace: Some("coding".to_string()),
+            url_session: UrlSessionState::default(),
         };
 
         state.save(&path).unwrap();
@@ -155,5 +245,45 @@ mod tests {
             error,
             RuntimeError::UnsupportedVersion { found: 2 }
         ));
+    }
+
+    #[test]
+    fn legacy_runtime_defaults_url_session_state() {
+        let state: RuntimeState =
+            serde_json::from_str(r#"{"version":1,"active_workspace":"coding"}"#).unwrap();
+
+        assert_eq!(state.active_workspace.as_deref(), Some("coding"));
+        assert!(state.url_session.is_empty());
+    }
+
+    #[test]
+    fn changing_boot_session_clears_opened_urls_and_failures() {
+        let mut state = RuntimeState::default();
+        state.ensure_url_boot_session("boot-1");
+        state.mark_url_opened("coding", "https://example.com/");
+        state.mark_url_failed("coding", "https://failed.example/", "failed");
+
+        state.ensure_url_boot_session("boot-2");
+
+        assert_eq!(state.url_session.boot_id.as_deref(), Some("boot-2"));
+        assert!(state.url_session.opened.is_empty());
+        assert!(state.url_session.failures.is_empty());
+    }
+
+    #[test]
+    fn clears_individual_and_workspace_url_markers() {
+        let mut state = RuntimeState::default();
+        state.ensure_url_boot_session("boot-1");
+        state.mark_url_opened("coding", "https://one.example/");
+        state.mark_url_opened("coding", "https://two.example/");
+        state.mark_url_failed("coding", "https://failed.example/", "failed");
+
+        state.clear_workspace_url("coding", "https://one.example/");
+        assert!(!state.url_was_opened("boot-1", "coding", "https://one.example/"));
+        assert!(state.url_was_opened("boot-1", "coding", "https://two.example/"));
+
+        state.clear_workspace_urls("coding");
+        assert!(!state.url_was_opened("boot-1", "coding", "https://two.example/"));
+        assert!(state.url_session.failures.is_empty());
     }
 }
