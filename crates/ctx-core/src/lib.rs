@@ -7,6 +7,7 @@ pub mod runtime;
 pub mod snapshot;
 pub mod spaces;
 pub mod switcher;
+pub mod urls;
 pub mod windows;
 
 pub use accessibility::{
@@ -22,7 +23,7 @@ pub use recovery::{
     SystemFirefoxPlatform, SystemVsCodePlatform, SystemWarpPlatform, VsCodeAdapter, VsCodePlatform,
     WarpAdapter, WarpPlatform, default_recovery_registry,
 };
-pub use runtime::{RuntimeError, RuntimeState};
+pub use runtime::{RuntimeError, RuntimeState, UrlSessionState};
 pub use snapshot::{SnapshotWindowReport, snapshot_workspace};
 pub use spaces::{
     DesktopSpace, DisplaySpaces, PlacementChange, SpaceError, SpaceInventory, WindowPlacement,
@@ -30,6 +31,11 @@ pub use spaces::{
     window_placement,
 };
 pub use switcher::{SwitchError, switch_workspace};
+pub use urls::{
+    SystemUrlOpener, UrlError, UrlLaunchFailure, UrlLaunchReport, UrlOpener, WorkspaceUrlState,
+    WorkspaceUrlStatus, current_boot_id, launch_workspace_urls, normalize_url, normalize_urls,
+    recovery_managed_urls, workspace_url_statuses,
+};
 pub use windows::{
     BrowserTabState, DesktopPlacement, RecoveryKind, RecoveryState, TerminalTabState, WindowBounds,
     WindowError, WindowInfo, WindowResolution, WindowState, WindowStatus, inspect_windows,

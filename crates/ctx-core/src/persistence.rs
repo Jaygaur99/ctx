@@ -193,6 +193,7 @@ mod tests {
         RuntimeState {
             version: 1,
             active_workspace: Some(name.to_string()),
+            url_session: Default::default(),
         }
     }
 

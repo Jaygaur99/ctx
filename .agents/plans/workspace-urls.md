@@ -8,8 +8,8 @@ Git automation, services, pause notes, custom URL schemes, per-workspace browser
 
 ## Product Rules
 
-- [ ] Accept and normalize only credential-free HTTP and HTTPS URLs.
-- [ ] Keep the existing `urls: [String]` YAML representation backward compatible.
+- [x] Accept and normalize only credential-free HTTP and HTTPS URLs.
+- [x] Keep the existing `urls: [String]` YAML representation backward compatible.
 - [ ] Open pending URLs after window recovery and before target-window focus.
 - [ ] Launch each configured URL once per macOS boot unless explicitly forced.
 - [ ] Treat URLs already captured in Firefox recovery state as recovery-managed.
@@ -18,10 +18,10 @@ Git automation, services, pause notes, custom URL schemes, per-workspace browser
 
 ## Step 1: Model and Runtime State
 
-- [ ] Add URL parsing, normalization, validation, status, and launch-report types.
-- [ ] Add backward-compatible boot-session URL state to `runtime.json`.
-- [ ] Reset successful-launch markers when the macOS boot identifier changes.
-- [ ] Add unit tests for validation, legacy state, boot changes, and marker cleanup.
+- [x] Add URL parsing, normalization, validation, status, and launch-report types.
+- [x] Add backward-compatible boot-session URL state to `runtime.json`.
+- [x] Reset successful-launch markers when the macOS boot identifier changes.
+- [x] Add unit tests for validation, legacy state, boot changes, and marker cleanup.
 
 ## Step 2: CLI Management
 

@@ -591,6 +591,7 @@ mod tests {
         let mut state = RuntimeState {
             version: 1,
             active_workspace: Some("previous".to_string()),
+            url_session: Default::default(),
         };
 
         switch_workspace_with(
@@ -768,6 +769,7 @@ mod tests {
         let mut state = RuntimeState {
             version: 1,
             active_workspace: Some("previous".to_string()),
+            url_session: Default::default(),
         };
 
         let error = switch_workspace_with(
@@ -898,6 +900,7 @@ mod tests {
         let mut state = RuntimeState {
             version: 1,
             active_workspace: Some("previous".to_string()),
+            url_session: Default::default(),
         };
 
         let error = switch_workspace_with(
