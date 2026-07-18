@@ -2,18 +2,18 @@
 
 ## Summary
 
-Build a macOS-only Tauri v2 menu-bar utility. Ctx has no conventional application window or Dock presence: clicking its status-item icon toggles a compact popover, while future window-picker and settings interfaces may use temporary hidden panels.
+Build a macOS-only Tauri v2 menu-bar utility. Ctx has no conventional application window or Dock presence: clicking its status-item icon toggles a compact popover, while window-picker and future settings interfaces use temporary hidden panels.
 
 The UI depends directly on `ctx-core`; it never invokes or parses the CLI. React, TypeScript, Vite, and npm provide the popover frontend.
 
 ## Fixed Product Decisions
 
 - [x] The first milestone contains the workspace overview, refresh, switch, open-URLs, and quit actions only.
-- [x] Window picking, settings, and launch-at-login are deferred.
+- [x] Window picking is included as a follow-up; settings and launch-at-login remain deferred.
 - [x] “Open URLs” explicitly reopens all configured URLs for that workspace (`force = true`) without changing the active workspace.
 - [x] Switching uses the existing complete core flow: recovery, desktop placement, URL activation, window switching, and transactional persistence.
 - [x] The popover refreshes whenever it opens, after actions, and on manual request; it does not poll while open.
-- [x] Git automation, services, pause notes, and configuration editing remain deferred.
+- [x] Git automation, services, pause notes, and workspace metadata editing remain deferred.
 - [x] `hideAll` remains available through the core/CLI but is not exposed in this first UI.
 
 ## Step 0 — Prepare the Baseline
@@ -37,7 +37,7 @@ The UI depends directly on `ctx-core`; it never invokes or parses the CLI. React
 
 - [x] Add `apps/ctx-ui` with a Tauri Rust crate, React/TypeScript/Vite frontend, npm lockfile, and membership in the Cargo workspace.
 - [x] Pin Tauri dependencies to one v2 minor release and use built-in tray/window APIs.
-- [x] Configure one hidden, borderless, fixed 400×560 `popover` webview with a shadow and no conventional window behavior.
+- [x] Configure one hidden, borderless, fixed 400×560 `popover` webview and one hidden temporary window-picker panel, both with no conventional main-window behavior.
 - [x] Set macOS activation policy to `Accessory` so Ctx has no Dock or application-switcher presence.
 - [x] Add a monochrome template status icon, active-workspace tooltip, and right-click Quit menu.
 - [x] Toggle and position the popover below the tray icon, clamped to the current monitor.
@@ -45,7 +45,7 @@ The UI depends directly on `ctx-core`; it never invokes or parses the CLI. React
 
 ## Step 3 — Implement the Thin Tauri Boundary
 
-- [x] Expose only `get_overview`, `switch_workspace`, `open_workspace_urls`, `hide_popover`, `show_popover`, and `quit` commands.
+- [x] Expose the overview/action commands plus thin window-picker context, candidate, and add-window commands.
 - [x] Run core work off the UI thread and serialize Tauri-originated operations behind one gate.
 - [x] Load config/runtime from disk for every command.
 - [x] Return core DTOs unchanged and serialize errors as `{ code, message }`.
@@ -76,12 +76,22 @@ The UI depends directly on `ctx-core`; it never invokes or parses the CLI. React
 - [x] Verify menu-bar-only launch, tray interactions, dismissal, and positioning logic.
 - [ ] Compare popover state against `ctx status --json`.
 - [ ] Exercise real workspace switching, recovery, placement, URL opening, errors, and external CLI refresh.
-- [x] Confirm no picker/settings panel or conventional main window is exposed.
+- [x] Confirm no settings panel or conventional main window is exposed; the picker remains hidden until explicitly requested.
+
+## Step 7 — Add the Window-Picker Follow-up
+
+- [x] Add `ctx-core` DTOs and facade methods for live candidates, workspace assignments, and persisted window additions.
+- [x] Resolve candidates from fresh window discovery, exclude Ctx's own panels, prevent duplicates, reject stale selections transactionally, and capture Desktop placement best-effort.
+- [x] Add an “Add windows” action to every workspace card.
+- [x] Open a temporary hidden picker panel with search, refresh, multi-select, assignment state, keyboard dismissal, and accessible light/dark styling.
+- [x] Serialize discovery and mutation through the existing Tauri operation gate and return to the refreshed menu-bar popover after completion.
+- [x] Add core and frontend coverage for assignments, idempotent persistence, stale selections, filtering, selection, and picker launch.
+- [ ] Run the new automated tests, builds, and macOS acceptance checks when the active user workflow permits.
 
 ## Assumptions and Deferred Work
 
 - macOS is the only supported UI platform.
 - The popover is technically a hidden webview window but behaves exclusively as a transient status-item popover.
 - Cross-process file locking is not added; existing atomic persistence remains in effect.
-- Window picker, workspace editing, settings, launch-at-login, `hideAll` controls, Git automation, services, pause notes, notifications, auto-update, and distribution/signing are later milestones.
-- Future picker/settings interfaces must open as temporary panels and remain hidden unless explicitly requested.
+- Workspace creation and metadata editing, settings, launch-at-login, `hideAll` controls, Git automation, services, pause notes, notifications, auto-update, and distribution/signing are later milestones.
+- The picker and future settings interfaces open as temporary panels and remain hidden unless explicitly requested.

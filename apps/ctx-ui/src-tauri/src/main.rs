@@ -5,7 +5,10 @@ compile_error!("Ctx UI is supported only on macOS");
 
 use std::sync::{Arc, Mutex};
 
-use ctx_core::{CtxApp, CtxAppError, CtxOverview, SwitchReport, UrlLaunchReport};
+use ctx_core::{
+    AddWindowsReport, CtxApp, CtxAppError, CtxOverview, SwitchReport, UrlLaunchReport,
+    WindowPickerOverview,
+};
 use serde::Serialize;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, Rect, State, WebviewWindow, WindowEvent,
@@ -16,12 +19,14 @@ use tauri::{
 
 const TRAY_ID: &str = "ctx";
 const POPOVER_LABEL: &str = "popover";
+const WINDOW_PICKER_LABEL: &str = "window-picker";
 const POPOVER_GAP: f64 = 6.0;
 
 #[derive(Clone)]
 struct AppState {
     core: CtxApp,
     operation_gate: Arc<Mutex<()>>,
+    picker_workspace: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -108,19 +113,86 @@ async fn open_workspace_urls(
 }
 
 #[tauri::command]
+async fn get_window_candidates(
+    workspace: String,
+    state: State<'_, AppState>,
+) -> Result<WindowPickerOverview, CommandError> {
+    run_core(state.inner().clone(), move |core| {
+        core.window_candidates(&workspace)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn add_windows_to_workspace(
+    workspace: String,
+    window_ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<AddWindowsReport, CommandError> {
+    run_core(state.inner().clone(), move |core| {
+        core.add_windows_to_workspace(&workspace, &window_ids)
+    })
+    .await
+}
+
+#[tauri::command]
 fn hide_popover(app: AppHandle) -> Result<(), CommandError> {
     popover(&app)?.hide().map_err(window_error)
 }
 
 #[tauri::command]
 fn show_popover(app: AppHandle) -> Result<(), CommandError> {
+    reveal_current_popover(&app)
+}
+
+#[tauri::command]
+fn show_window_picker(
+    workspace: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    {
+        let mut selected = state
+            .picker_workspace
+            .lock()
+            .map_err(|_| CommandError::internal("Window picker state is unavailable"))?;
+        *selected = Some(workspace.clone());
+    }
+
+    let picker = window_picker(&app)?;
+    popover(&app)?.hide().map_err(window_error)?;
+    let title = format!("Ctx — Add windows to {workspace}");
+    picker.set_title(&title).map_err(window_error)?;
+    picker.center().map_err(window_error)?;
+    picker.show().map_err(window_error)?;
+    picker.set_focus().map_err(window_error)?;
+    app.emit_to(WINDOW_PICKER_LABEL, "ctx://window-picker-opened", workspace)
+        .map_err(window_error)
+}
+
+#[tauri::command]
+fn get_window_picker_workspace(state: State<'_, AppState>) -> Result<String, CommandError> {
+    state
+        .picker_workspace
+        .lock()
+        .map_err(|_| CommandError::internal("Window picker state is unavailable"))?
+        .clone()
+        .ok_or_else(|| CommandError::internal("No workspace is selected for the window picker"))
+}
+
+#[tauri::command]
+fn hide_window_picker(app: AppHandle) -> Result<(), CommandError> {
+    window_picker(&app)?.hide().map_err(window_error)
+}
+
+fn reveal_current_popover(app: &AppHandle) -> Result<(), CommandError> {
     let rect = app
         .tray_by_id(TRAY_ID)
         .ok_or_else(|| CommandError::internal("Ctx tray icon is unavailable"))?
         .rect()
         .map_err(window_error)?
         .ok_or_else(|| CommandError::internal("Ctx tray position is unavailable"))?;
-    reveal_popover(&app, &rect)
+    reveal_popover(app, &rect)
 }
 
 #[tauri::command]
@@ -135,6 +207,11 @@ fn window_error(error: impl ToString) -> CommandError {
 fn popover(app: &AppHandle) -> Result<WebviewWindow, CommandError> {
     app.get_webview_window(POPOVER_LABEL)
         .ok_or_else(|| CommandError::internal("Ctx popover is unavailable"))
+}
+
+fn window_picker(app: &AppHandle) -> Result<WebviewWindow, CommandError> {
+    app.get_webview_window(WINDOW_PICKER_LABEL)
+        .ok_or_else(|| CommandError::internal("Ctx window picker is unavailable"))
 }
 
 fn reveal_popover(app: &AppHandle, tray_rect: &Rect) -> Result<(), CommandError> {
@@ -232,6 +309,7 @@ fn main() {
         .manage(AppState {
             core: CtxApp::discover(None).expect("failed to resolve Ctx application paths"),
             operation_gate: Arc::new(Mutex::new(())),
+            picker_workspace: Arc::new(Mutex::new(None)),
         })
         .setup(|app| {
             app.handle()
@@ -258,6 +336,11 @@ fn main() {
                     } = event
                     {
                         let app = tray.app_handle();
+                        if let Ok(picker) = window_picker(app) {
+                            if picker.is_visible().unwrap_or(false) {
+                                let _ = picker.hide();
+                            }
+                        }
                         if let Ok(window) = popover(app) {
                             match popover_toggle_action(window.is_visible().unwrap_or(false)) {
                                 PopoverToggleAction::Hide => {
@@ -277,13 +360,24 @@ fn main() {
             if window.label() == POPOVER_LABEL && matches!(event, WindowEvent::Focused(false)) {
                 let _ = window.hide();
             }
+            if window.label() == WINDOW_PICKER_LABEL {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_overview,
             switch_workspace,
             open_workspace_urls,
+            get_window_candidates,
+            add_windows_to_workspace,
             hide_popover,
             show_popover,
+            show_window_picker,
+            get_window_picker_workspace,
+            hide_window_picker,
             quit,
         ])
         .run(tauri::generate_context!())
@@ -382,6 +476,7 @@ mod tests {
         let state = AppState {
             core: CtxApp::from_paths("/tmp/config.yaml", "/tmp/runtime.json"),
             operation_gate: gate.clone(),
+            picker_workspace: Arc::new(Mutex::new(None)),
         };
         let guard = gate.lock().unwrap();
         let (sender, receiver) = mpsc::channel();

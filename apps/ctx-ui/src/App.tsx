@@ -7,6 +7,7 @@ import {
   openWorkspaceUrls,
   quitCtx,
   showPopover,
+  showWindowPicker,
   switchWorkspace,
 } from "./api";
 import type {
@@ -190,11 +191,13 @@ function WorkspaceCard({
   busy,
   onSwitch,
   onOpenUrls,
+  onAddWindows,
 }: {
   workspace: WorkspaceOverview;
   busy: BusyAction;
   onSwitch: (name: string) => void;
   onOpenUrls: (name: string) => void;
+  onAddWindows: (name: string) => void;
 }) {
   const isBusy = busy?.workspace === workspace.name;
   return (
@@ -218,6 +221,13 @@ function WorkspaceCard({
       </div>
 
       <div className="workspace-actions">
+        <button
+          className="button"
+          disabled={busy !== null}
+          onClick={() => onAddWindows(workspace.name)}
+        >
+          <span aria-hidden="true">＋</span> Add windows
+        </button>
         {!workspace.active && (
           <button
             className="button button--primary"
@@ -353,6 +363,15 @@ export default function App() {
     }
   };
 
+  const openWindowPicker = async (workspace: string) => {
+    setError(null);
+    try {
+      await showWindowPicker(workspace);
+    } catch (cause) {
+      setError(normalizeCommandError(cause));
+    }
+  };
+
   const staleActive = overview?.active_workspace && !overview.workspaces.some((workspace) => workspace.active);
 
   return (
@@ -395,6 +414,7 @@ export default function App() {
               busy={busy}
               onSwitch={(name) => void runWorkspaceAction(name, "switch")}
               onOpenUrls={(name) => void runWorkspaceAction(name, "open")}
+              onAddWindows={(name) => void openWindowPicker(name)}
             />
           ))}
         </div>
@@ -402,7 +422,7 @@ export default function App() {
 
       <footer className="app-footer">
         <button className="text-button" disabled={refreshing || busy !== null} onClick={() => void refresh()}>Refresh</button>
-        <span>{busy ? `${busy.action === "switch" ? "Switching" : "Opening"} ${busy.workspace}…` : "Configuration is read-only"}</span>
+        <span>{busy ? `${busy.action === "switch" ? "Switching" : "Opening"} ${busy.workspace}…` : "Changes save automatically"}</span>
         <button className="text-button text-button--danger" onClick={() => void quitCtx()}>Quit</button>
       </footer>
     </main>

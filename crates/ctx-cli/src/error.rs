@@ -48,6 +48,9 @@ pub enum CliError {
     #[error("window {id} is not selectable; run `ctx listAll` again")]
     WindowNotSelectable { id: u32 },
 
+    #[error("select at least one window")]
+    NoWindowsSelected,
+
     #[error("window {id} is not ignored; run `ctx listAll` to inspect exclusions")]
     WindowNotIgnored { id: u32 },
 
@@ -76,6 +79,8 @@ impl From<CtxAppError> for CliError {
             CtxAppError::Switch(error) => Self::Switch(error),
             CtxAppError::Persistence(error) => Self::SwitchPersistence(error),
             CtxAppError::WorkspaceMissing { name } => Self::WorkspaceMissing { name },
+            CtxAppError::NoWindowsSelected => Self::NoWindowsSelected,
+            CtxAppError::WindowNotSelectable { id } => Self::WindowNotSelectable { id },
         }
     }
 }
@@ -88,6 +93,7 @@ impl CliError {
             | Self::Switch(SwitchError::Accessibility(AccessibilityError::PermissionRequired)) => 3,
             Self::WorkspaceMissing { .. }
             | Self::NoActiveWorkspace
+            | Self::NoWindowsSelected
             | Self::WindowNotSelectable { .. }
             | Self::WindowNotIgnored { .. }
             | Self::WindowUnavailable { .. }

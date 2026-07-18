@@ -15,7 +15,10 @@ pub use accessibility::{
     AccessibilityError, WindowActionFailure, WindowActionReport, close_windows, minimize_windows,
     minimize_windows_best_effort, request_accessibility_permission, restore_windows,
 };
-pub use application::{CtxApp, CtxAppError, CtxOverview, WorkspaceOverview};
+pub use application::{
+    AddWindowsReport, CtxApp, CtxAppError, CtxOverview, WindowCandidate, WindowPickerOverview,
+    WorkspaceOverview,
+};
 pub use config::{Config, ConfigError, Service, Workspace};
 pub use paths::{AppPaths, PathsError};
 pub use persistence::{SwitchPersistenceError, save_switch_transaction};

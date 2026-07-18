@@ -1,13 +1,17 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::{Path, PathBuf},
+};
 
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::{
-    AppPaths, Config, ConfigError, PathsError, RuntimeError, RuntimeState, Service, SwitchError,
-    SwitchPersistenceError, SwitchReport, SystemUrlOpener, UrlError, UrlLaunchReport, UrlOpener,
-    WindowError, WindowInfo, WindowStatus, WorkspaceUrlStatus, current_boot_id, inspect_windows,
-    launch_workspace_urls, list_all_windows, list_windows, save_switch_transaction,
+    AppPaths, Config, ConfigError, DesktopPlacement, PathsError, RuntimeError, RuntimeState,
+    Service, SpaceError, SwitchError, SwitchPersistenceError, SwitchReport, SystemUrlOpener,
+    UrlError, UrlLaunchReport, UrlOpener, WindowBounds, WindowError, WindowInfo, WindowResolution,
+    WindowStatus, WorkspaceUrlStatus, capture_desktop_placement, current_boot_id, inspect_windows,
+    launch_workspace_urls, list_all_windows, list_windows, resolve_window, save_switch_transaction,
     switch_workspace, workspace_url_statuses,
 };
 
@@ -27,6 +31,30 @@ pub struct WorkspaceOverview {
     pub windows: Vec<WindowStatus>,
     pub urls: Vec<String>,
     pub url_statuses: Vec<WorkspaceUrlStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WindowCandidate {
+    pub id: u32,
+    pub pid: i32,
+    pub application: String,
+    pub title: Option<String>,
+    pub bounds: Option<WindowBounds>,
+    pub assigned_to: Vec<String>,
+    pub already_in_workspace: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WindowPickerOverview {
+    pub workspace: String,
+    pub windows: Vec<WindowCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AddWindowsReport {
+    pub workspace: String,
+    pub added: Vec<WindowInfo>,
+    pub already_tracked: Vec<u32>,
 }
 
 #[derive(Debug, Error)]
@@ -54,6 +82,12 @@ pub enum CtxAppError {
 
     #[error("workspace '{name}' does not exist")]
     WorkspaceMissing { name: String },
+
+    #[error("select at least one window")]
+    NoWindowsSelected,
+
+    #[error("window {id} is not selectable; refresh the window picker and try again")]
+    WindowNotSelectable { id: u32 },
 }
 
 impl CtxAppError {
@@ -71,6 +105,8 @@ impl CtxAppError {
             Self::Switch(_) => "switch",
             Self::Persistence(_) => "persistence",
             Self::WorkspaceMissing { .. } => "workspace_missing",
+            Self::NoWindowsSelected => "no_windows_selected",
+            Self::WindowNotSelectable { .. } => "window_not_selectable",
         }
     }
 }
@@ -142,6 +178,31 @@ impl CtxApp {
         self.open_workspace_urls_with(name, force, &boot_id, &mut opener)
     }
 
+    pub fn window_candidates(&self, workspace: &str) -> Result<WindowPickerOverview, CtxAppError> {
+        let config = Config::load(&self.config_path)?;
+        let windows = list_all_windows()?;
+        build_window_picker(
+            &config,
+            workspace,
+            &windows,
+            Some(std::process::id() as i32),
+        )
+    }
+
+    pub fn add_windows_to_workspace(
+        &self,
+        workspace: &str,
+        window_ids: &[u32],
+    ) -> Result<AddWindowsReport, CtxAppError> {
+        if window_ids.is_empty() {
+            return Err(CtxAppError::NoWindowsSelected);
+        }
+        let windows = list_all_windows()?;
+        self.add_windows_to_workspace_with(workspace, window_ids, &windows, |id| {
+            capture_desktop_placement(id)
+        })
+    }
+
     fn switch_workspace_with<F>(
         &self,
         name: &str,
@@ -175,6 +236,149 @@ impl CtxApp {
         state.save(&self.runtime_path)?;
         Ok(report)
     }
+
+    fn add_windows_to_workspace_with<F>(
+        &self,
+        workspace: &str,
+        window_ids: &[u32],
+        current_windows: &[WindowInfo],
+        mut capture_placement: F,
+    ) -> Result<AddWindowsReport, CtxAppError>
+    where
+        F: FnMut(u32) -> Result<DesktopPlacement, SpaceError>,
+    {
+        if window_ids.is_empty() {
+            return Err(CtxAppError::NoWindowsSelected);
+        }
+
+        let mut config = Config::load(&self.config_path)?;
+        let existing = config
+            .workspace(workspace)
+            .ok_or_else(|| CtxAppError::WorkspaceMissing {
+                name: workspace.to_string(),
+            })?
+            .windows
+            .clone();
+        let available: BTreeMap<_, _> = current_windows
+            .iter()
+            .map(|window| (window.id, window))
+            .collect();
+        let mut seen = BTreeSet::new();
+        let mut added = Vec::new();
+        let mut already_tracked = Vec::new();
+
+        for id in window_ids.iter().copied().filter(|id| seen.insert(*id)) {
+            let current = available
+                .get(&id)
+                .ok_or(CtxAppError::WindowNotSelectable { id })?;
+            let tracked = existing.iter().chain(added.iter()).any(|saved| {
+                matches!(
+                    resolve_window(saved, current_windows),
+                    WindowResolution::Resolved(resolved) if resolved.id == id
+                )
+            });
+            if tracked {
+                already_tracked.push(id);
+                continue;
+            }
+
+            let mut selected = (*current).clone();
+            match capture_placement(selected.id) {
+                Ok(placement) => selected.placement = Some(placement),
+                Err(error) => {
+                    selected.placement_warning =
+                        Some(format!("Desktop placement capture failed: {error}"));
+                }
+            }
+            added.push(selected);
+        }
+
+        if !added.is_empty() {
+            config
+                .workspaces
+                .get_mut(workspace)
+                .expect("workspace existence was checked above")
+                .windows
+                .extend(added.iter().cloned());
+            config.save(&self.config_path)?;
+        }
+
+        Ok(AddWindowsReport {
+            workspace: workspace.to_string(),
+            added,
+            already_tracked,
+        })
+    }
+}
+
+fn build_window_picker(
+    config: &Config,
+    workspace: &str,
+    current_windows: &[WindowInfo],
+    excluded_pid: Option<i32>,
+) -> Result<WindowPickerOverview, CtxAppError> {
+    if config.workspace(workspace).is_none() {
+        return Err(CtxAppError::WorkspaceMissing {
+            name: workspace.to_string(),
+        });
+    }
+
+    let assignments = assignment_map(config, current_windows);
+    let mut windows: Vec<_> = current_windows
+        .iter()
+        .filter(|window| excluded_pid != Some(window.pid))
+        .map(|window| {
+            let assigned_to = assignments.get(&window.id).cloned().unwrap_or_default();
+            WindowCandidate {
+                id: window.id,
+                pid: window.pid,
+                application: window.owner.clone(),
+                title: window.title.clone(),
+                bounds: window.bounds,
+                already_in_workspace: assigned_to.iter().any(|name| name == workspace),
+                assigned_to,
+            }
+        })
+        .collect();
+    windows.sort_by(|first, second| {
+        first
+            .application
+            .to_lowercase()
+            .cmp(&second.application.to_lowercase())
+            .then_with(|| first.title.cmp(&second.title))
+            .then_with(|| first.id.cmp(&second.id))
+    });
+
+    Ok(WindowPickerOverview {
+        workspace: workspace.to_string(),
+        windows,
+    })
+}
+
+fn assignment_map(config: &Config, current_windows: &[WindowInfo]) -> BTreeMap<u32, Vec<String>> {
+    let mut assignments: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+
+    for (name, workspace) in &config.workspaces {
+        for saved in &workspace.windows {
+            if let WindowResolution::Resolved(current) = resolve_window(saved, current_windows) {
+                assignments
+                    .entry(current.id)
+                    .or_default()
+                    .push(name.clone());
+            }
+        }
+    }
+
+    for saved in &config.ignored_windows {
+        if let WindowResolution::Resolved(current) = resolve_window(saved, current_windows) {
+            assignments
+                .entry(current.id)
+                .or_default()
+                .push("<ignored>".to_string());
+        }
+    }
+
+    assignments
 }
 
 fn build_overview(
@@ -234,6 +438,27 @@ mod tests {
             } else {
                 Ok(())
             }
+        }
+    }
+
+    fn test_window(id: u32, pid: i32, application: &str, title: &str) -> WindowInfo {
+        WindowInfo {
+            id,
+            pid,
+            owner: application.to_string(),
+            title: Some(title.to_string()),
+            bounds: Some(WindowBounds {
+                x: 10,
+                y: 20,
+                width: 900,
+                height: 700,
+            }),
+            bundle_id: Some(format!("com.example.{}", application.to_lowercase())),
+            application_path: None,
+            recovery: None,
+            recovery_warning: None,
+            placement: None,
+            placement_warning: None,
         }
     }
 
@@ -403,6 +628,117 @@ mod tests {
                 .unwrap()
                 .url_failure("boot", "coding", "https://example.com/")
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn window_picker_reports_assignments_and_excludes_the_calling_process() {
+        let tracked = test_window(10, 100, "Code", "Ctx");
+        let own_panel = test_window(20, 200, "Ctx", "Add windows");
+        let mut workspaces = BTreeMap::new();
+        workspaces.insert(
+            "coding".to_string(),
+            Workspace {
+                path: None,
+                services: Vec::new(),
+                urls: Vec::new(),
+                windows: vec![tracked.clone()],
+            },
+        );
+        let config = Config {
+            version: 1,
+            ignored_windows: Vec::new(),
+            workspaces,
+        };
+
+        let picker = build_window_picker(&config, "coding", &[tracked], Some(200)).unwrap();
+        assert_eq!(picker.windows.len(), 1);
+        assert_eq!(picker.windows[0].assigned_to, vec!["coding"]);
+        assert!(picker.windows[0].already_in_workspace);
+
+        let picker = build_window_picker(&config, "coding", &[own_panel], Some(200)).unwrap();
+        assert!(picker.windows.is_empty());
+    }
+
+    #[test]
+    fn adding_windows_captures_placement_and_persists_idempotently() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("workspaces.yaml");
+        let runtime_path = directory.path().join("runtime.json");
+        Config::from_yaml("version: 1\nworkspaces:\n  coding: {}\n")
+            .unwrap()
+            .save(&config_path)
+            .unwrap();
+        let app = CtxApp::from_paths(&config_path, &runtime_path);
+        let window = test_window(42, 7, "Code", "Ctx");
+
+        let first = app
+            .add_windows_to_workspace_with(
+                "coding",
+                &[42, 42],
+                std::slice::from_ref(&window),
+                |_| {
+                    Ok(DesktopPlacement {
+                        display_uuid: "main".to_string(),
+                        desktop_ordinal: 2,
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(first.added.len(), 1);
+        assert_eq!(
+            first.added[0].placement.as_ref().unwrap().desktop_ordinal,
+            2
+        );
+
+        let second = app
+            .add_windows_to_workspace_with(
+                "coding",
+                &[42],
+                std::slice::from_ref(&window),
+                |_| unreachable!(),
+            )
+            .unwrap();
+        assert!(second.added.is_empty());
+        assert_eq!(second.already_tracked, vec![42]);
+        assert_eq!(
+            Config::load(config_path)
+                .unwrap()
+                .workspace("coding")
+                .unwrap()
+                .windows
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn stale_picker_selection_does_not_partially_update_the_workspace() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("workspaces.yaml");
+        Config::from_yaml("version: 1\nworkspaces:\n  coding: {}\n")
+            .unwrap()
+            .save(&config_path)
+            .unwrap();
+        let app = CtxApp::from_paths(&config_path, directory.path().join("runtime.json"));
+        let window = test_window(42, 7, "Code", "Ctx");
+
+        let error = app
+            .add_windows_to_workspace_with("coding", &[42, 99], &[window], |_| {
+                Ok(DesktopPlacement {
+                    display_uuid: "main".to_string(),
+                    desktop_ordinal: 1,
+                })
+            })
+            .unwrap_err();
+        assert!(matches!(error, CtxAppError::WindowNotSelectable { id: 99 }));
+        assert!(
+            Config::load(config_path)
+                .unwrap()
+                .workspace("coding")
+                .unwrap()
+                .windows
+                .is_empty()
         );
     }
 }

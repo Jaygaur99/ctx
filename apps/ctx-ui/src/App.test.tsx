@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   openWorkspaceUrls: vi.fn(),
   quitCtx: vi.fn(),
   showPopover: vi.fn(),
+  showWindowPicker: vi.fn(),
   switchWorkspace: vi.fn(),
 }));
 
@@ -67,6 +68,7 @@ describe("Ctx popover", () => {
     api.getOverview.mockResolvedValue(overview);
     api.hidePopover.mockResolvedValue(undefined);
     api.showPopover.mockResolvedValue(undefined);
+    api.showWindowPicker.mockResolvedValue(undefined);
     api.onPopoverOpened.mockResolvedValue(() => undefined);
     api.switchWorkspace.mockResolvedValue({
       urls: { workspace: "research", opened: [], already_opened: [], recovery_managed: [], failed: [] },
@@ -112,5 +114,14 @@ describe("Ctx popover", () => {
 
     await waitFor(() => expect(api.showPopover).toHaveBeenCalled());
     expect(await screen.findByText(/could not be opened/)).toBeInTheDocument();
+  });
+
+  it("opens the temporary window picker for a workspace", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Add windows/ })[0]);
+
+    await waitFor(() => expect(api.showWindowPicker).toHaveBeenCalledWith("coding"));
   });
 });

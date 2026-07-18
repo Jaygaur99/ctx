@@ -7,6 +7,43 @@ export interface DesktopPlacement {
   desktop_ordinal: number;
 }
 
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface WindowCandidate {
+  id: number;
+  pid: number;
+  application: string;
+  title: string | null;
+  bounds: WindowBounds | null;
+  assigned_to: string[];
+  already_in_workspace: boolean;
+}
+
+export interface WindowPickerOverview {
+  workspace: string;
+  windows: WindowCandidate[];
+}
+
+export interface AddedWindow {
+  id: number;
+  pid: number;
+  owner: string;
+  title: string | null;
+  placement: DesktopPlacement | null;
+  placement_warning: string | null;
+}
+
+export interface AddWindowsReport {
+  workspace: string;
+  added: AddedWindow[];
+  already_tracked: number[];
+}
+
 export interface WindowStatus {
   saved_id: number;
   resolved_id: number | null;
