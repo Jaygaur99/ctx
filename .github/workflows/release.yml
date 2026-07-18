@@ -1,0 +1,71 @@
+name: Release Ctx
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-macos:
+    name: Build universal macOS app
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out tag
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/ctx-ui/package-lock.json
+
+      - name: Verify tag matches app version
+        shell: bash
+        run: |
+          app_version="$(node -p "require('./apps/ctx-ui/package.json').version")"
+          if [[ "$GITHUB_REF_NAME" != "v$app_version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match app version v$app_version" >&2
+            exit 1
+          fi
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Install frontend dependencies
+        working-directory: apps/ctx-ui
+        run: npm ci
+
+      - name: Build app and publish release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/ctx-ui
+          tagName: ${{ github.ref_name }}
+          releaseName: Ctx ${{ github.ref_name }}
+          releaseBody: |
+            Download the Ctx app bundle below, extract it, and move Ctx.app to Applications.
+
+            This build is ad-hoc signed but not Apple-notarized. macOS may require first-launch approval in Privacy & Security.
+          generateReleaseNotes: true
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          uploadUpdaterJson: false
+          args: --target universal-apple-darwin
