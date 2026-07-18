@@ -6,13 +6,12 @@ use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
 use clap::Parser;
 use cli::{Cli, Commands, UrlCommands, WindowFilters};
 use ctx_core::{
-    AppPaths, Config, GenericAppAdapter, RuntimeState, SystemUrlOpener, UrlError, UrlLaunchReport,
+    AppPaths, Config, CtxApp, GenericAppAdapter, RuntimeState, UrlError, UrlLaunchReport,
     WindowInfo, WindowResolution, WindowState, WindowStatus, WorkspaceUrlState, WorkspaceUrlStatus,
     add_urls_to_workspace, capture_desktop_placement, close_windows, current_boot_id,
-    default_recovery_registry, inspect_windows, launch_workspace_urls, list_all_windows,
-    list_spaces, list_windows, minimize_windows_best_effort, reconcile_windows,
-    remove_urls_from_workspace, resolve_window, save_switch_transaction, snapshot_workspace,
-    switch_workspace, window_placement, workspace_url_statuses,
+    default_recovery_registry, list_all_windows, list_spaces, list_windows,
+    minimize_windows_best_effort, reconcile_windows, remove_urls_from_workspace, resolve_window,
+    save_switch_transaction, snapshot_workspace, window_placement, workspace_url_statuses,
 };
 use error::CliError;
 use serde_json::{Value, json};
@@ -322,30 +321,11 @@ fn open_workspace_urls(
     force: bool,
     json_output: bool,
 ) -> Result<(), CliError> {
-    let app_paths = AppPaths::discover()?;
-    let config_path = config_override.unwrap_or(app_paths.config_file);
-    let config = Config::load(config_path)?;
-    let mut state = RuntimeState::load(&app_paths.runtime_file)?;
+    let app = CtxApp::discover(config_override)?;
     let workspace_name = workspace_name
-        .or_else(|| state.active_workspace.clone())
+        .or(app.active_workspace()?)
         .ok_or(CliError::NoActiveWorkspace)?;
-    let workspace =
-        config
-            .workspace(&workspace_name)
-            .ok_or_else(|| CliError::WorkspaceMissing {
-                name: workspace_name.clone(),
-            })?;
-    let boot_id = current_boot_id()?;
-    let mut opener = SystemUrlOpener;
-    let report = launch_workspace_urls(
-        &workspace_name,
-        workspace,
-        &mut state,
-        &boot_id,
-        force,
-        &mut opener,
-    );
-    state.save(app_paths.runtime_file)?;
+    let report = app.open_workspace_urls(&workspace_name, force)?;
     print_url_launch_report(&report, json_output)?;
     if report.has_failures() {
         return Err(CliError::UrlLaunchPartial {
@@ -638,13 +618,7 @@ fn switch_to_workspace(
     name: String,
     json_output: bool,
 ) -> Result<(), CliError> {
-    let app_paths = AppPaths::discover()?;
-    let config_path = config_override.unwrap_or(app_paths.config_file);
-    let mut config = Config::load(&config_path)?;
-    let mut state = RuntimeState::load(&app_paths.runtime_file)?;
-
-    let report = switch_workspace(&mut config, &mut state, &name)?;
-    save_switch_transaction(&config, &config_path, &state, app_paths.runtime_file)?;
+    let report = CtxApp::discover(config_override)?.switch_workspace(&name)?;
 
     if json_output {
         print_json(json!({
@@ -660,54 +634,40 @@ fn switch_to_workspace(
 }
 
 fn show_status(config_override: Option<PathBuf>, json_output: bool) -> Result<(), CliError> {
-    let app_paths = AppPaths::discover()?;
-    let config_path = config_override.unwrap_or(app_paths.config_file);
-    let config = Config::load(&config_path)?;
-    let state = RuntimeState::load(app_paths.runtime_file)?;
-    let boot_id = current_boot_id()?;
-    let all_windows = list_all_windows()?;
-    let visible_windows = list_windows()?;
+    let overview = CtxApp::discover(config_override)?.overview()?;
 
     if json_output {
-        let workspaces: Vec<_> = config
+        let workspaces: Vec<_> = overview
             .workspaces
             .iter()
-            .map(|(name, workspace)| {
+            .map(|workspace| {
                 json!({
-                    "name": name,
-                    "active": state.active_workspace.as_deref() == Some(name),
+                    "name": workspace.name,
+                    "active": workspace.active,
                     "urls": workspace.urls,
-                    "url_statuses": workspace_url_statuses(name, workspace, &state, &boot_id),
-                    "windows": inspect_windows(&workspace.windows, &all_windows, &visible_windows),
+                    "url_statuses": workspace.url_statuses,
+                    "windows": workspace.windows,
                 })
             })
             .collect();
         print_json(json!({
-            "config": config_path,
-            "active_workspace": state.active_workspace,
+            "config": overview.config_path,
+            "active_workspace": overview.active_workspace,
             "workspaces": workspaces,
         }))?;
     } else {
-        println!("Config: {}", config_path.display());
+        println!("Config: {}", overview.config_path.display());
         println!(
             "Active: {}",
-            state.active_workspace.as_deref().unwrap_or("<none>")
+            overview.active_workspace.as_deref().unwrap_or("<none>")
         );
-        println!("Workspaces: {}", config.workspaces.len());
+        println!("Workspaces: {}", overview.workspaces.len());
 
-        for (name, workspace) in &config.workspaces {
-            let marker = if state.active_workspace.as_deref() == Some(name) {
-                "*"
-            } else {
-                " "
-            };
-            println!("{marker} {name}");
-            print_window_statuses(&inspect_windows(
-                &workspace.windows,
-                &all_windows,
-                &visible_windows,
-            ));
-            print_url_statuses(&workspace_url_statuses(name, workspace, &state, &boot_id));
+        for workspace in &overview.workspaces {
+            let marker = if workspace.active { "*" } else { " " };
+            println!("{marker} {}", workspace.name);
+            print_window_statuses(&workspace.windows);
+            print_url_statuses(&workspace.url_statuses);
         }
     }
 
@@ -719,32 +679,28 @@ fn show_workspace(
     name: String,
     json_output: bool,
 ) -> Result<(), CliError> {
-    let app_paths = AppPaths::discover()?;
-    let config_path = config_override.unwrap_or(app_paths.config_file);
-    let config = Config::load(config_path)?;
-    let state = RuntimeState::load(app_paths.runtime_file)?;
-    let boot_id = current_boot_id()?;
-    let workspace = config
-        .workspace(&name)
+    let overview = CtxApp::discover(config_override)?.overview()?;
+    let workspace = overview
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.name == name)
         .ok_or_else(|| CliError::WorkspaceMissing { name: name.clone() })?;
-    let statuses = inspect_windows(&workspace.windows, &list_all_windows()?, &list_windows()?);
-    let active = state.active_workspace.as_deref() == Some(&name);
 
     if json_output {
         print_json(json!({
             "name": name,
-            "active": active,
+            "active": workspace.active,
             "path": workspace.path,
             "services": workspace.services,
             "urls": workspace.urls,
-            "url_statuses": workspace_url_statuses(&name, workspace, &state, &boot_id),
-            "windows": statuses,
+            "url_statuses": workspace.url_statuses,
+            "windows": workspace.windows,
         }))?;
     } else {
         println!("Workspace: {name}");
-        println!("Active: {active}");
-        print_window_statuses(&statuses);
-        print_url_statuses(&workspace_url_statuses(&name, workspace, &state, &boot_id));
+        println!("Active: {}", workspace.active);
+        print_window_statuses(&workspace.windows);
+        print_url_statuses(&workspace.url_statuses);
     }
 
     Ok(())

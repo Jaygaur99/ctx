@@ -1,5 +1,18 @@
 # Rust build artifacts
 /target/
+
+# Web/Tauri frontend artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+apps/ctx-ui/vite.config.js
+apps/ctx-ui/vite.config.d.ts
+apps/ctx-ui/src-tauri/gen/
+apps/ctx-ui/src-tauri/icons/android/
+apps/ctx-ui/src-tauri/icons/ios/
+apps/ctx-ui/src-tauri/icons/Square*.png
+apps/ctx-ui/src-tauri/icons/StoreLogo.png
+apps/ctx-ui/src-tauri/icons/icon.ico
 # Local editor and operating-system files
 .DS_Store
 *.swp

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "apps/ctx-ui/src-tauri",
     "crates/ctx-core",
     "crates/ctx-cli",
 ]

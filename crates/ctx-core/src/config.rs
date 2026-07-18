@@ -94,7 +94,7 @@ pub struct Workspace {
     pub windows: Vec<WindowInfo>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Service {
     Process {

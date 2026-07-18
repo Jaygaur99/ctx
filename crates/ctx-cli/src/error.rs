@@ -1,6 +1,6 @@
 use ctx_core::{
-    AccessibilityError, ConfigError, PathsError, RecoveryError, RuntimeError, SpaceError,
-    SwitchError, SwitchPersistenceError, UrlError, WindowError, WindowState,
+    AccessibilityError, ConfigError, CtxAppError, PathsError, RecoveryError, RuntimeError,
+    SpaceError, SwitchError, SwitchPersistenceError, UrlError, WindowError, WindowState,
 };
 use thiserror::Error;
 
@@ -65,6 +65,21 @@ pub enum CliError {
     UrlLaunchPartial { failed: usize },
 }
 
+impl From<CtxAppError> for CliError {
+    fn from(error: CtxAppError) -> Self {
+        match error {
+            CtxAppError::Paths(error) => Self::Paths(error),
+            CtxAppError::Config(error) => Self::Config(error),
+            CtxAppError::Runtime(error) => Self::Runtime(error),
+            CtxAppError::Window(error) => Self::Window(error),
+            CtxAppError::Url(error) => Self::Url(error),
+            CtxAppError::Switch(error) => Self::Switch(error),
+            CtxAppError::Persistence(error) => Self::SwitchPersistence(error),
+            CtxAppError::WorkspaceMissing { name } => Self::WorkspaceMissing { name },
+        }
+    }
+}
+
 impl CliError {
     pub fn exit_code(&self) -> u8 {
         match self {
@@ -100,5 +115,18 @@ mod tests {
         let error = CliError::Window(WindowError::ScreenRecordingPermissionRequired);
 
         assert_eq!(error.exit_code(), 3);
+    }
+
+    #[test]
+    fn application_errors_preserve_existing_exit_categories() {
+        let missing = CliError::from(CtxAppError::WorkspaceMissing {
+            name: "missing".to_string(),
+        });
+        let permission = CliError::from(CtxAppError::Window(
+            WindowError::ScreenRecordingPermissionRequired,
+        ));
+
+        assert_eq!(missing.exit_code(), 2);
+        assert_eq!(permission.exit_code(), 3);
     }
 }

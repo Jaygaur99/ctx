@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "popover-capability",
+  "description": "Minimal capability for the Ctx menu-bar popover",
+  "windows": ["popover"],
+  "permissions": ["core:default"]
+}

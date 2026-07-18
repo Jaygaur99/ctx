@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use directories::BaseDirs;
 use thiserror::Error;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPaths {
     pub config_file: PathBuf,
     pub runtime_file: PathBuf,
