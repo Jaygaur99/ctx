@@ -17,6 +17,7 @@ import WindowPicker from "./WindowPicker";
 import ContextEditor from "./ContextEditor";
 import SettingsSheet from "./SettingsSheet";
 import { trapDialogFocus } from "./dialogFocus";
+import { useAppearancePreferences } from "./useAppearancePreferences";
 import type {
   AddWindowsReport,
   CommandError,
@@ -24,7 +25,6 @@ import type {
   CtxOverview,
   DeleteWorkspacesReport,
   UrlLaunchFailure,
-  ThemePreference,
   WindowActionFailure,
   WindowStatus,
   WorkspaceOverview,
@@ -43,25 +43,6 @@ type SheetState =
   | { kind: "settings"; returnFocus: HTMLButtonElement }
   | null;
 type Tone = "neutral" | "good" | "warning" | "danger" | "accent";
-const SIMPLE_MODE_KEY = "ctx.simple-mode";
-const THEME_KEY = "ctx.theme";
-
-function initialSimpleMode() {
-  try {
-    return window.localStorage.getItem(SIMPLE_MODE_KEY) !== "detailed";
-  } catch {
-    return true;
-  }
-}
-
-function initialTheme(): ThemePreference {
-  try {
-    const stored = window.localStorage.getItem(THEME_KEY);
-    return stored === "light" || stored === "dark" ? stored : "system";
-  } catch {
-    return "system";
-  }
-}
 
 interface CountItem {
   label: string;
@@ -546,8 +527,12 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<BusyAction>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
-  const [simpleMode, setSimpleMode] = useState(initialSimpleMode);
-  const [theme, setTheme] = useState<ThemePreference>(initialTheme);
+  const {
+    simpleMode,
+    theme,
+    setSimpleMode,
+    setTheme,
+  } = useAppearancePreferences();
 
   const closeTransientSheet = useCallback(() => {
     const returnFocus = sheet?.returnFocus;
@@ -573,18 +558,6 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === "system") root.removeAttribute("data-theme");
-    else root.dataset.theme = theme;
-
-    return () => {
-      if (theme === "system" || root.dataset.theme === theme) {
-        root.removeAttribute("data-theme");
-      }
-    };
-  }, [theme]);
 
   useEffect(() => {
     let disposed = false;
@@ -659,25 +632,6 @@ export default function App() {
       setBusy(null);
       setError(normalizeCommandError(cause));
       await showPopover().catch(() => undefined);
-    }
-  };
-
-  const updateSimpleMode = (enabled: boolean) => {
-    setSimpleMode(enabled);
-    try {
-      window.localStorage.setItem(SIMPLE_MODE_KEY, enabled ? "simple" : "detailed");
-    } catch {
-      // The view still changes for this session if storage is unavailable.
-    }
-  };
-
-  const updateTheme = (preference: ThemePreference) => {
-    setTheme(preference);
-    try {
-      if (preference === "system") window.localStorage.removeItem(THEME_KEY);
-      else window.localStorage.setItem(THEME_KEY, preference);
-    } catch {
-      // The theme still changes for this session if storage is unavailable.
     }
   };
 
@@ -839,8 +793,8 @@ export default function App() {
           returnFocus={sheet.returnFocus}
           simpleMode={simpleMode}
           theme={theme}
-          onSimpleModeChange={updateSimpleMode}
-          onThemeChange={updateTheme}
+          onSimpleModeChange={setSimpleMode}
+          onThemeChange={setTheme}
         />
       )}
     </main>
