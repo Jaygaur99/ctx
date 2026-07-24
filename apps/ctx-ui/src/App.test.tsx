@@ -131,7 +131,7 @@ describe("Ctx popover", () => {
     expect(document.querySelector(".workspace-summary")).not.toBeInTheDocument();
     expect(screen.queryByText("Details")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show detailed view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Detailed view" }));
     fireEvent.click(screen.getAllByText("Details")[0]);
     expect(screen.getByText("Ctx", { selector: ".detail-item strong" })).toBeInTheDocument();
     expect(screen.getByText("Desktop 2")).toBeInTheDocument();
@@ -145,7 +145,7 @@ describe("Ctx popover", () => {
 
     await screen.findByRole("heading", { name: "coding" });
     expect(document.querySelector(".workspace-summary")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Use simple view" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Detailed view" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("hides every other window while preserving the active context", async () => {
@@ -183,7 +183,7 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "research" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+    fireEvent.click(screen.getByRole("button", { name: "Switch to research context" }));
 
     await waitFor(() => expect(api.switchWorkspace).toHaveBeenCalledWith("research"));
     expect(api.hidePopover).toHaveBeenCalled();
@@ -200,7 +200,7 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "research" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open URLs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open URLs for research context" }));
 
     await waitFor(() => expect(api.showPopover).toHaveBeenCalled());
     expect(await screen.findByText(/could not be opened/)).toBeInTheDocument();
@@ -210,10 +210,25 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "coding" });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Add windows/ })[0]);
+    const trigger = screen.getByRole("button", { name: "Add windows to coding context" });
+    trigger.focus();
+    fireEvent.click(trigger);
 
-    expect(await screen.findByRole("dialog", { name: "Add windows" })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "Add windows" });
     await waitFor(() => expect(api.getWindowCandidates).toHaveBeenCalledWith("coding"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("gives repeated context actions distinct VoiceOver names", async () => {
+    render(<App />);
+
+    const active = await screen.findByRole("article", { name: "coding context, active" });
+    const inactive = screen.getByRole("article", { name: "research context" });
+    expect(within(active).getByRole("button", { name: "Edit coding context" })).toBeInTheDocument();
+    expect(within(active).getByRole("button", { name: "Add windows to coding context" })).toBeInTheDocument();
+    expect(within(inactive).getByRole("button", { name: "Switch to research context" })).toBeInTheDocument();
+    expect(within(inactive).getByRole("button", { name: "Open URLs for research context" })).toBeInTheDocument();
   });
 
   it("creates a context from the top control and proceeds to window selection", async () => {
@@ -227,6 +242,20 @@ describe("Ctx popover", () => {
 
     await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("new-context"));
     expect(await screen.findByRole("dialog", { name: "Add windows" })).toBeInTheDocument();
+  });
+
+  it("restores focus after dismissing a lightweight sheet with Escape", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+    const trigger = screen.getByRole("button", { name: "Create context" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Create context" });
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create context" })).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 
   it("deletes one context from the top delete control", async () => {
@@ -255,7 +284,7 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "coding" });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit coding context" }));
     const dialog = screen.getByRole("dialog", { name: "Edit context" });
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Context name" }), {
       target: { value: "deep-work" },
@@ -284,7 +313,7 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "coding" });
 
-    const editTrigger = screen.getAllByRole("button", { name: "Edit" })[0];
+    const editTrigger = screen.getByRole("button", { name: "Edit coding context" });
     fireEvent.click(editTrigger);
     const dialog = screen.getByRole("dialog", { name: "Edit context" });
     const name = within(dialog).getByRole("textbox", { name: "Context name" });
@@ -326,7 +355,7 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "coding" });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit coding context" }));
     const dialog = screen.getByRole("dialog", { name: "Edit context" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Move URL 1 down" }));
     expect(within(dialog).getByRole("textbox", { name: "URL 1" })).toHaveValue("https://two.test/");
@@ -356,7 +385,7 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "coding" });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit coding context" }));
     const dialog = screen.getByRole("dialog", { name: "Edit context" });
     const name = within(dialog).getByRole("textbox", { name: "Context name" });
     fireEvent.change(name, { target: { value: "deep-work" } });
@@ -389,7 +418,7 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "coding" });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit coding context" }));
     const dialog = screen.getByRole("dialog", { name: "Edit context" });
     expect(within(dialog).getByText("Code · missing")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
@@ -413,7 +442,7 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "coding" });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit coding context" }));
     const dialog = screen.getByRole("dialog", { name: "Edit context" });
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Context name" }), {
       target: { value: "research" },
@@ -441,7 +470,7 @@ describe("Ctx popover", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "empty" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit empty context" }));
     const dialog = screen.getByRole("dialog", { name: "Edit context" });
     expect(within(dialog).getByText("No URLs configured.")).toBeInTheDocument();
     expect(within(dialog).getByText("No windows tracked.")).toBeInTheDocument();

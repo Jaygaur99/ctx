@@ -108,16 +108,19 @@ Completed and verified on 2026-07-24. Simple Mode is the default and its one-cli
 
 ## Step 7 — Polish, Verify v1.0
 
-- [ ] Resolve the highest-value usability findings from Step 0.
-- [ ] Review popover density, labels, destructive-action language, keyboard navigation, and VoiceOver names.
-- [ ] Keep the current Ctx icon unless a deliberate brand redesign is requested.
-- [ ] Run Rust formatting, workspace tests, strict Clippy, frontend tests/type-check/build, and a universal Tauri bundle build.
-- [ ] Run `git diff --check` and `graphify update .`.
-- [ ] Repeat the real macOS acceptance pass on the built artifact.
-- [ ] Update the README for context editing and Settings behavior.
-- [ ] Bump every package/app version together and publish v1.0 through the tag-only release workflow.
+- [x] Resolve the highest-value usability findings from Step 0.
+- [x] Review popover density, labels, destructive-action language, keyboard navigation, and VoiceOver names.
+- [x] Keep the current Ctx icon unless a deliberate brand redesign is requested.
+- [x] Run Rust formatting, workspace tests, strict Clippy, and frontend tests/type-check/build.
+- [x] Verify the universal Apple Silicon and Intel executable and signed `.app` bundle; leave DMG/Finder packaging with Step 8 per the user.
+- [x] Run `git diff --check` and `graphify update .`.
+- [x] Update the README for context editing and Settings behavior.
+
+Completed and verified on 2026-07-24. Repeated context actions now have distinct VoiceOver names, every in-popover sheet shares keyboard focus containment, lightweight sheets restore their trigger focus, Simple/Detailed labeling is stable, and the README reflects context editing, Hide All, Simple Mode, Settings, and universal local builds. The full repository-local test and build gate passes; DMG packaging and updater work remain explicitly user-owned.
 
 ## Step 8 - Add auto updater using tauri auto update and release it.
+
+- [ ] Bump every package/app version together and publish v1.0 through the tag-only release workflow.
 
 ## Step 9 - Verify and merge in main
 

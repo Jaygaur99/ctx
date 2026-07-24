@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   getAppSettings,
   normalizeCommandError,
@@ -6,6 +6,7 @@ import {
   setLaunchAtLogin,
 } from "./api";
 import type { AppSettings, CommandError, SettingsTarget } from "./types";
+import { trapDialogFocus } from "./dialogFocus";
 
 function PermissionRow({
   label,
@@ -52,7 +53,6 @@ export default function SettingsSheet({
   onClose: () => void;
   returnFocus: HTMLButtonElement | null;
 }) {
-  const dialogRef = useRef<HTMLElement>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -89,21 +89,7 @@ export default function SettingsSheet({
       close();
       return;
     }
-    if (event.key !== "Tab") return;
-
-    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-    ) ?? [])];
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    trapDialogFocus(event);
   };
 
   const updateLaunchAtLogin = async (enabled: boolean) => {
@@ -132,7 +118,6 @@ export default function SettingsSheet({
 
   return (
     <section
-      ref={dialogRef}
       className="sheet sheet--compact"
       role="dialog"
       aria-modal="true"

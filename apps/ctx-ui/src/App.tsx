@@ -16,6 +16,7 @@ import {
 import WindowPicker from "./WindowPicker";
 import ContextEditor from "./ContextEditor";
 import SettingsSheet from "./SettingsSheet";
+import { trapDialogFocus } from "./dialogFocus";
 import type {
   AddWindowsReport,
   CommandError,
@@ -34,9 +35,9 @@ type BusyAction =
   | { action: "hide_all" }
   | null;
 type SheetState =
-  | { kind: "create" }
-  | { kind: "delete" }
-  | { kind: "windows"; workspace: string }
+  | { kind: "create"; returnFocus: HTMLButtonElement }
+  | { kind: "delete"; returnFocus: HTMLButtonElement }
+  | { kind: "windows"; workspace: string; returnFocus: HTMLButtonElement }
   | { kind: "edit"; workspace: string; returnFocus: HTMLButtonElement }
   | { kind: "settings"; returnFocus: HTMLButtonElement }
   | null;
@@ -228,16 +229,22 @@ function WorkspaceCard({
   busy: BusyAction;
   onSwitch: (name: string) => void;
   onOpenUrls: (name: string) => void;
-  onAddWindows: (name: string) => void;
+  onAddWindows: (name: string, trigger: HTMLButtonElement) => void;
   onEdit: (name: string, trigger: HTMLButtonElement) => void;
   showDiagnostics: boolean;
 }) {
   const isBusy = busy?.action !== "hide_all" && busy?.workspace === workspace.name;
   return (
-    <article className={`workspace-card${workspace.active ? " workspace-card--active" : ""}`}>
+    <article
+      className={`workspace-card${workspace.active ? " workspace-card--active" : ""}`}
+      aria-label={`${workspace.name} context${workspace.active ? ", active" : ""}`}
+    >
       <div className="workspace-card__header">
         <div className="workspace-title">
-          <span className={`workspace-dot${workspace.active ? " workspace-dot--active" : ""}`} />
+          <span
+            className={`workspace-dot${workspace.active ? " workspace-dot--active" : ""}`}
+            aria-hidden="true"
+          />
           <div>
             <h2>{workspace.name}</h2>
             {workspace.path && <p title={workspace.path}>{workspace.path}</p>}
@@ -256,19 +263,26 @@ function WorkspaceCard({
       )}
 
       <div className="workspace-actions">
-        <button className="button" disabled={busy !== null} onClick={(event) => onEdit(workspace.name, event.currentTarget)}>
+        <button
+          className="button"
+          aria-label={`Edit ${workspace.name} context`}
+          disabled={busy !== null}
+          onClick={(event) => onEdit(workspace.name, event.currentTarget)}
+        >
           Edit
         </button>
         <button
           className="button"
+          aria-label={`Add windows to ${workspace.name} context`}
           disabled={busy !== null}
-          onClick={() => onAddWindows(workspace.name)}
+          onClick={(event) => onAddWindows(workspace.name, event.currentTarget)}
         >
           <span aria-hidden="true">＋</span> Add windows
         </button>
         {!workspace.active && (
           <button
             className="button button--primary"
+            aria-label={`Switch to ${workspace.name} context`}
             disabled={busy !== null}
             onClick={() => onSwitch(workspace.name)}
           >
@@ -278,6 +292,7 @@ function WorkspaceCard({
         {workspace.urls.length > 0 && (
           <button
             className="button"
+            aria-label={`Open URLs for ${workspace.name} context`}
             disabled={busy !== null}
             onClick={() => onOpenUrls(workspace.name)}
           >
@@ -288,7 +303,7 @@ function WorkspaceCard({
 
       {showDiagnostics && (workspace.windows.length > 0 || workspace.url_statuses.length > 0) && (
         <details className="workspace-details">
-          <summary>Details</summary>
+          <summary aria-label={`Show ${workspace.name} diagnostics`}>Details</summary>
           {workspace.windows.length > 0 && (
             <section>
               <h3>Tracked windows</h3>
@@ -310,7 +325,7 @@ function WorkspaceCard({
 function ErrorBanner({ error, onRetry }: { error: CommandError; onRetry: () => void }) {
   return (
     <div className={`banner banner--${error.code === "permission" ? "warning" : "danger"}`} role="alert">
-      <strong>{error.code === "permission" ? "Permission required" : "Ctx couldn’t refresh"}</strong>
+      <strong>{error.code === "permission" ? "Permission required" : "Ctx couldn’t complete that action"}</strong>
       <p>{error.message}</p>
       <button className="text-button" onClick={onRetry}>Try again</button>
     </div>
@@ -375,7 +390,13 @@ function CreateContextSheet({
   };
 
   return (
-    <section className="sheet sheet--compact" role="dialog" aria-modal="true" aria-labelledby="create-context-title">
+    <section
+      className="sheet sheet--compact"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-context-title"
+      onKeyDown={trapDialogFocus}
+    >
       <header className="sheet-header">
         <div>
           <h2 id="create-context-title">Create context</h2>
@@ -458,7 +479,13 @@ function DeleteContextSheet({
   };
 
   return (
-    <section className="sheet sheet--compact" role="dialog" aria-modal="true" aria-labelledby="delete-context-title">
+    <section
+      className="sheet sheet--compact"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-context-title"
+      onKeyDown={trapDialogFocus}
+    >
       <header className="sheet-header">
         <div>
           <h2 id="delete-context-title">Delete contexts</h2>
@@ -473,6 +500,7 @@ function DeleteContextSheet({
           id="delete-context-name"
           className="text-field"
           value={selected}
+          autoFocus
           disabled={saving || workspaces.length === 0}
           onChange={(event) => setSelected(event.target.value)}
         >
@@ -509,6 +537,14 @@ export default function App() {
   const [sheet, setSheet] = useState<SheetState>(null);
   const [simpleMode, setSimpleMode] = useState(initialSimpleMode);
 
+  const closeTransientSheet = useCallback(() => {
+    const returnFocus = sheet?.returnFocus;
+    setSheet(null);
+    window.requestAnimationFrame(() => {
+      if (returnFocus?.isConnected) returnFocus.focus();
+    });
+  }, [sheet]);
+
   const refresh = useCallback(async () => {
     if (busy) return;
     setRefreshing(true);
@@ -542,13 +578,13 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (sheet?.kind === "edit" || sheet?.kind === "settings") return;
-      if (sheet) setSheet(null);
+      if (sheet?.kind === "edit" || sheet?.kind === "settings" || sheet?.kind === "windows") return;
+      if (sheet) closeTransientSheet();
       else void hidePopover();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [sheet]);
+  }, [closeTransientSheet, sheet]);
 
   const orderedWorkspaces = useMemo(
     () => [...(overview?.workspaces ?? [])].sort((first, second) => {
@@ -614,22 +650,24 @@ export default function App() {
     });
   };
 
-  const openWindowPicker = (workspace: string) => {
-    setSheet({ kind: "windows", workspace });
+  const openWindowPicker = (workspace: string, returnFocus: HTMLButtonElement) => {
+    setSheet({ kind: "windows", workspace, returnFocus });
   };
 
   const contextCreated = async (report: CreateWorkspaceReport) => {
+    if (sheet?.kind !== "create") return;
+    const { returnFocus } = sheet;
     await refresh();
-    setSheet({ kind: "windows", workspace: report.workspace });
+    setSheet({ kind: "windows", workspace: report.workspace, returnFocus });
   };
 
   const contextsDeleted = async (_report: DeleteWorkspacesReport) => {
-    setSheet(null);
+    closeTransientSheet();
     await refresh();
   };
 
   const windowsAdded = async (_report: AddWindowsReport) => {
-    setSheet(null);
+    closeTransientSheet();
     await refresh();
   };
 
@@ -649,18 +687,18 @@ export default function App() {
         <header className="app-header">
         <div>
           <div className="brand-row">
-            <span className="brand-mark">C</span>
+            <span className="brand-mark" aria-hidden="true">C</span>
             <h1>Ctx</h1>
           </div>
           <p>{overview?.active_workspace ? `Active: ${overview.active_workspace}` : "No active workspace"}</p>
         </div>
         <div className="header-actions">
-          <button className="header-button header-button--icon" aria-label="Create context" title="Create context" disabled={busy !== null} onClick={() => setSheet({ kind: "create" })}>
+          <button className="header-button header-button--icon" aria-label="Create context" title="Create context" disabled={busy !== null} onClick={(event) => setSheet({ kind: "create", returnFocus: event.currentTarget })}>
             <svg aria-hidden="true" viewBox="0 0 24 24">
               <path d="M12 5v14M5 12h14" />
             </svg>
           </button>
-          <button className="header-button header-button--icon header-button--danger" aria-label="Delete contexts" title="Delete contexts" disabled={busy !== null || !overview?.workspaces.length} onClick={() => setSheet({ kind: "delete" })}>
+          <button className="header-button header-button--icon header-button--danger" aria-label="Delete contexts" title="Delete contexts" disabled={busy !== null || !overview?.workspaces.length} onClick={(event) => setSheet({ kind: "delete", returnFocus: event.currentTarget })}>
             <svg aria-hidden="true" viewBox="0 0 24 24">
               <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
             </svg>
@@ -679,7 +717,7 @@ export default function App() {
           </button>
           <button
             className="header-button header-button--icon"
-            aria-label={simpleMode ? "Show detailed view" : "Use simple view"}
+            aria-label="Detailed view"
             title={simpleMode ? "Show detailed view" : "Use simple view"}
             aria-pressed={!simpleMode}
             disabled={busy !== null}
@@ -755,20 +793,20 @@ export default function App() {
       </div>
 
       {sheet?.kind === "create" && (
-        <CreateContextSheet onClose={() => setSheet(null)} onCreated={(report) => void contextCreated(report)} />
+        <CreateContextSheet onClose={closeTransientSheet} onCreated={(report) => void contextCreated(report)} />
       )}
       {sheet?.kind === "delete" && overview && (
         <DeleteContextSheet
           workspaces={overview.workspaces}
           activeWorkspace={overview.active_workspace}
-          onClose={() => setSheet(null)}
+          onClose={closeTransientSheet}
           onDeleted={(report) => void contextsDeleted(report)}
         />
       )}
       {sheet?.kind === "windows" && (
         <WindowPicker
           workspace={sheet.workspace}
-          onClose={() => setSheet(null)}
+          onClose={closeTransientSheet}
           onAdded={(report) => void windowsAdded(report)}
         />
       )}

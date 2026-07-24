@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { addWindowsToWorkspace, getWindowCandidates, normalizeCommandError } from "./api";
+import { trapDialogFocus } from "./dialogFocus";
 import type {
   AddWindowsReport,
   CommandError,
@@ -141,7 +142,13 @@ export default function WindowPicker({
   };
 
   return (
-    <section className="sheet" role="dialog" aria-modal="true" aria-labelledby="window-picker-title">
+    <section
+      className="sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="window-picker-title"
+      onKeyDown={trapDialogFocus}
+    >
       <header className="sheet-header">
         <div>
           <h2 id="window-picker-title">Add windows</h2>

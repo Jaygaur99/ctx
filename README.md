@@ -25,8 +25,10 @@ The app lives entirely in the menu bar. It has no normal main window, Dock icon,
 
 - **Menu-bar first.** Click the status item for a compact popover; click outside it or press Escape to hide it.
 - **One-action switching.** Recover missing windows, restore Desktop placement, open configured URLs, and activate the target context through the same `ctx-core` flow used by the CLI.
-- **Context management in the UI.** Create or delete contexts and add windows from any macOS Desktop without opening a conventional app window.
-- **Live state at a glance.** See visible, minimized, missing, or ambiguous windows plus recovery, placement, and URL status.
+- **Complete context editing in the UI.** Create, rename, or delete contexts; add or forget tracked windows; and add, remove, or reorder URLs without opening a conventional app window.
+- **Simple by default, detailed on demand.** Everyday actions stay compact while Detailed View exposes visible, minimized, missing, or ambiguous windows plus recovery, placement, and URL status.
+- **Hide everything else.** One menu-bar action minimizes every manageable window except the windows in the active context.
+- **Built-in settings.** Start Ctx at login, review Screen Recording and Accessibility status, open the configuration folder, and inspect the installed version.
 - **Durable app recovery.** Capture richer state for VS Code, Antigravity, Warp, and Firefox; other apps use a generic relaunch fallback.
 - **CLI and JSON output.** Inspect and control the same workspaces from scripts and the terminal.
 - **Local-first storage.** Configuration and runtime markers stay on your Mac. Ctx has no account or hosted service.
@@ -51,12 +53,14 @@ Release builds are ad-hoc signed but are not yet Apple-notarized. On first launc
 ## Quick start
 
 1. Click the Ctx menu-bar icon.
-2. Choose **+ Context**, enter a name, and create it.
+2. Choose **Create context**, enter a name, and create it.
 3. In the window picker, select the windows that belong to the context and choose **Add windows**.
-4. Create another context, then use **Switch** to move between them.
-5. Expand a context to inspect individual window, recovery, Desktop placement, and URL state.
+4. Choose **Edit** on a context to rename it, maintain its URLs, or stop tracking selected windows.
+5. Create another context, then use **Switch** to move between them.
+6. Use **Hide all except active context** to minimize everything outside the active context.
+7. Toggle **Detailed View** when you need window, recovery, Desktop placement, or URL diagnostics.
 
-**Open URLs** always opens every configured URL for that context without changing the active context. URL editing is currently available through the CLI.
+**Open URLs** always opens every configured URL for that context without changing the active context.
 
 ## CLI
 
@@ -102,7 +106,7 @@ ctx status --json
 | `ctx show NAME` | Show one context and its live state. |
 | `ctx status` | Show all contexts and the active context. |
 | `ctx url add\|remove\|list\|open` | Manage and launch context URLs. |
-| `ctx ignore` / `ctx unignore` | Manage exclusions used by `hideAll`. |
+| `ctx ignore` / `ctx unignore` | Mark or unmark windows as ignored in status and window-assignment views. |
 | `ctx hideAll` | Minimize windows outside the active context. |
 | `ctx close [NAME]` | Stop and close a context. |
 | `ctx remove NAME` | Delete a context definition. |
@@ -119,7 +123,7 @@ Ctx stores its files in the standard per-user macOS locations:
 | Runtime state | `~/Library/Application Support/Ctx/data/runtime.json` |
 | Logs directory | `~/Library/Logs/Ctx` |
 
-The UI manages context names and windows. URLs and advanced metadata can be edited with the CLI or directly in `workspaces.yaml` while Ctx is not performing an action. A minimal configuration is:
+The UI manages context names, tracked windows, and URLs. Advanced metadata can be edited with the CLI or directly in `workspaces.yaml` while Ctx is not performing an action. A minimal configuration is:
 
 ```yaml
 version: 1
@@ -186,6 +190,13 @@ cd apps/ctx-ui
 npm run tauri build
 ```
 
+Build the same universal Apple Silicon and Intel bundle used by releases with:
+
+```bash
+cd apps/ctx-ui
+npm run tauri build -- --target universal-apple-darwin
+```
+
 ## Releases
 
 The release workflow runs **only** when a version tag matching `v*` is pushed. It builds a universal macOS app for Apple Silicon and Intel, creates a GitHub Release, attaches the app bundle, and generates release notes.
@@ -199,7 +210,7 @@ Branch pushes and pull requests do not run the release workflow.
 
 ## Current scope
 
-Ctx currently supports macOS only. Settings, launch at login, auto-update, notifications, distribution signing/notarization, Git automation, services UI, and pause notes are planned for later iterations.
+Ctx currently supports macOS only. Auto-update, notifications, Developer ID signing/notarization, Git automation, services UI, and pause notes are planned for later iterations.
 
 Issues and focused pull requests are welcome. Please keep platform behavior and persistence logic in `ctx-core` so the CLI and menu-bar app cannot drift apart.
 

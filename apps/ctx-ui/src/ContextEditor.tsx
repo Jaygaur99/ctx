@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { editWorkspace, normalizeCommandError } from "./api";
+import { trapDialogFocus } from "./dialogFocus";
 import type { CommandError, EditWorkspaceReport, WorkspaceOverview } from "./types";
 
 interface UrlRow {
@@ -18,7 +19,6 @@ export default function ContextEditor({
   onSaved: (report: EditWorkspaceReport) => void;
   returnFocus: HTMLButtonElement | null;
 }) {
-  const dialogRef = useRef<HTMLElement>(null);
   const [name, setName] = useState(workspace.name);
   const [urls, setUrls] = useState<UrlRow[]>(
     workspace.urls.map((value, id) => ({ id, value })),
@@ -65,21 +65,7 @@ export default function ContextEditor({
       requestClose();
       return;
     }
-    if (event.key !== "Tab") return;
-
-    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-    ) ?? [])];
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    trapDialogFocus(event);
   };
 
   const updateUrl = (id: number, value: string) => {
@@ -140,7 +126,6 @@ export default function ContextEditor({
 
   return (
     <section
-      ref={dialogRef}
       className="sheet sheet--compact"
       role="dialog"
       aria-modal="true"
