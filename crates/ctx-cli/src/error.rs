@@ -1,6 +1,7 @@
 use ctx_core::{
-    AccessibilityError, ConfigError, CtxAppError, PathsError, RecoveryError, RuntimeError,
-    SpaceError, SwitchError, SwitchPersistenceError, UrlError, WindowError, WindowState,
+    AccessibilityError, ConfigError, CtxAppError, MutationLockError, PathsError, RecoveryError,
+    RuntimeError, SpaceError, SwitchError, SwitchPersistenceError, UrlError, WindowError,
+    WindowState,
 };
 use thiserror::Error;
 
@@ -38,6 +39,9 @@ pub enum CliError {
 
     #[error(transparent)]
     Url(#[from] UrlError),
+
+    #[error(transparent)]
+    Mutation(#[from] MutationLockError),
 
     #[error("workspace '{name}' does not exist")]
     WorkspaceMissing { name: String },
@@ -78,6 +82,7 @@ impl From<CtxAppError> for CliError {
             CtxAppError::Url(error) => Self::Url(error),
             CtxAppError::Switch(error) => Self::Switch(error),
             CtxAppError::Persistence(error) => Self::SwitchPersistence(error),
+            CtxAppError::Mutation(error) => Self::Mutation(error),
             CtxAppError::WorkspaceMissing { name } => Self::WorkspaceMissing { name },
             CtxAppError::NoWindowsSelected => Self::NoWindowsSelected,
             CtxAppError::WindowNotSelectable { id } => Self::WindowNotSelectable { id },

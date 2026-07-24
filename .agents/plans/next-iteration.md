@@ -23,26 +23,30 @@ Proposed plan for the next working session. We will review the priorities togeth
 
 ## Step 0 — Start With v0.2 Dogfooding
 
-- [ ] Install the published release asset into `/Applications` as a clean-user test.
-- [ ] Verify first-launch Gatekeeper, Screen Recording, and Accessibility instructions.
-- [ ] Confirm one menu-bar icon, no Dock icon, no Cmd-Tab entry, and no visible startup window.
-- [ ] Compare the popover with `ctx status --json` for active context, windows, recovery, placement, and URL state.
-- [ ] Exercise real switches containing visible, minimized, missing, and recoverable windows across multiple displays and Desktops.
-- [ ] Verify context creation, individual deletion, delete-all confirmation, window picking, forced URL opening, and external CLI refresh.
-- [ ] Record concrete bugs or confusing interactions before adding features; fix any data-loss, switching, or recovery issue first.
+- [x] Install the published release asset into `/Applications` as a clean-user test.
+- [x] Verify first-launch Gatekeeper, Screen Recording, and Accessibility instructions.
+- [x] Confirm one menu-bar icon, no Dock icon, no Cmd-Tab entry, and no visible startup window.
+- [x] Compare the popover with `ctx status --json` for active context, windows, recovery, placement, and URL state.
+- [x] Exercise real switches containing visible, minimized, missing, and recoverable windows across multiple displays and Desktops.
+- [x] Verify context creation, individual deletion, delete-all confirmation, window picking, forced URL opening, and external CLI refresh.
+- [x] Record concrete bugs or confusing interactions before adding features; fix any data-loss, switching, or recovery issue first.
 
 Done when we trust the release behavior and have a short, prioritized list of real-world friction.
 
+Accepted complete on 2026-07-24. Keep installed-release tests isolated from `tauri dev`: a leftover Vite server or development `ctx-tauri` process can mask `/Applications/Ctx.app` and make permission or launch behavior appear inconsistent.
+
 ## Step 1 — Protect Concurrent CLI and UI Mutations
 
-- [ ] Add a shared, path-based mutation lock in `ctx-core` so simultaneous CLI and UI writes cannot silently overwrite each other.
-- [ ] Cover context, window, URL, switch, snapshot, and runtime-marker mutations.
-- [ ] Use a bounded wait and return a typed busy/lock error with an actionable message.
-- [ ] Preserve existing atomic transaction and rollback behavior after the lock is acquired.
-- [ ] Add concurrency tests for competing mutations, lock release after errors, and independent custom config paths.
-- [ ] Keep read-only overview operations responsive when no inconsistent state can be observed.
+- [x] Add a shared, path-based mutation lock in `ctx-core` so simultaneous CLI and UI writes cannot silently overwrite each other.
+- [x] Cover context, window, URL, switch, snapshot, and runtime-marker mutations.
+- [x] Use a bounded wait and return a typed busy/lock error with an actionable message.
+- [x] Preserve existing atomic transaction and rollback behavior after the lock is acquired.
+- [x] Add concurrency tests for competing mutations, lock release after errors, and independent custom config paths.
+- [x] Keep read-only overview operations responsive when no inconsistent state can be observed.
 
 Done when Ctx has one cross-process mutation contract rather than relying only on atomic file replacement.
+
+Completed and independently verified on 2026-07-24. Rust workspace tests, strict Clippy, frontend tests, and the production frontend build pass with only this slice applied.
 
 ## Step 2 — Complete Context Editing
 

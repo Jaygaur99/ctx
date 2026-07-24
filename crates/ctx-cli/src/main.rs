@@ -1,13 +1,18 @@
 mod cli;
 mod error;
 
-use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use clap::Parser;
 use cli::{Cli, Commands, UrlCommands, WindowFilters};
 use ctx_core::{
-    AppPaths, Config, CtxApp, GenericAppAdapter, RuntimeState, UrlError, UrlLaunchReport,
-    WindowInfo, WindowResolution, WindowState, WindowStatus, WorkspaceUrlState, WorkspaceUrlStatus,
+    AppPaths, Config, CtxApp, DEFAULT_MUTATION_LOCK_TIMEOUT, GenericAppAdapter, MutationGuard,
+    RuntimeState, UrlError, UrlLaunchReport, WindowInfo, WindowResolution, WindowState,
+    WindowStatus, WorkspaceUrlState, WorkspaceUrlStatus, acquire_mutation_lock,
     add_urls_to_workspace, capture_desktop_placement, close_windows, current_boot_id,
     default_recovery_registry, list_all_windows, list_spaces, list_windows,
     minimize_windows_best_effort, reconcile_windows, remove_urls_from_workspace, resolve_window,
@@ -108,6 +113,7 @@ fn snapshot(
 ) -> Result<(), CliError> {
     let app_paths = AppPaths::discover()?;
     let config_path = config_override.unwrap_or(app_paths.config_file);
+    let _guard = lock_config_mutations(&config_path)?;
     let mut config = Config::load(&config_path)?;
     let state = RuntimeState::load(app_paths.runtime_file)?;
     let name = name
@@ -193,6 +199,7 @@ fn add_workspace_urls(
     json_output: bool,
 ) -> Result<(), CliError> {
     let config_path = resolve_config_path(config_override)?;
+    let _guard = lock_config_mutations(&config_path)?;
     let mut config = Config::load(&config_path)?;
     let workspace =
         config
@@ -232,6 +239,7 @@ fn remove_workspace_urls(
 ) -> Result<(), CliError> {
     let app_paths = AppPaths::discover()?;
     let config_path = config_override.unwrap_or(app_paths.config_file);
+    let _guard = lock_config_mutations(&config_path)?;
     let mut config = Config::load(&config_path)?;
     let mut state = RuntimeState::load(&app_paths.runtime_file)?;
     let workspace =
@@ -363,6 +371,7 @@ fn print_url_launch_report(report: &UrlLaunchReport, json_output: bool) -> Resul
 fn hide_all(config_override: Option<PathBuf>, json_output: bool) -> Result<(), CliError> {
     let app_paths = AppPaths::discover()?;
     let config_path = config_override.unwrap_or(app_paths.config_file);
+    let _guard = lock_config_mutations(&config_path)?;
     let mut config = Config::load(&config_path)?;
     let state = RuntimeState::load(app_paths.runtime_file)?;
     let active_name = state.active_workspace.ok_or(CliError::NoActiveWorkspace)?;
@@ -420,6 +429,7 @@ fn ignore_windows(
     json_output: bool,
 ) -> Result<(), CliError> {
     let config_path = resolve_config_path(config_override)?;
+    let _guard = lock_config_mutations(&config_path)?;
     let mut config = Config::load(&config_path)?;
     let current_windows = list_all_windows()?;
     reconcile_windows(&mut config.ignored_windows, &current_windows);
@@ -459,6 +469,7 @@ fn unignore_windows(
     json_output: bool,
 ) -> Result<(), CliError> {
     let config_path = resolve_config_path(config_override)?;
+    let _guard = lock_config_mutations(&config_path)?;
     let mut config = Config::load(&config_path)?;
     reconcile_windows(&mut config.ignored_windows, &list_all_windows()?);
 
@@ -492,6 +503,7 @@ fn unignore_windows(
 
 fn init_config(config_override: Option<PathBuf>, json_output: bool) -> Result<(), CliError> {
     let config_path = resolve_config_path(config_override)?;
+    let _guard = lock_config_mutations(&config_path)?;
 
     Config::init(&config_path)?;
     if json_output {
@@ -572,6 +584,7 @@ fn add_workspace(
     json_output: bool,
 ) -> Result<(), CliError> {
     let config_path = resolve_config_path(config_override)?;
+    let _guard = lock_config_mutations(&config_path)?;
     let mut config = Config::load(&config_path)?;
     let available: BTreeMap<_, _> = list_all_windows()?
         .into_iter()
@@ -729,6 +742,7 @@ fn close_workspace(
 ) -> Result<(), CliError> {
     let app_paths = AppPaths::discover()?;
     let config_path = config_override.unwrap_or(app_paths.config_file);
+    let _guard = lock_config_mutations(&config_path)?;
     let mut config = Config::load(&config_path)?;
     let mut state = RuntimeState::load(&app_paths.runtime_file)?;
     let name = name
@@ -887,4 +901,11 @@ fn print_json(value: Value) -> Result<(), CliError> {
 
 fn resolve_config_path(config_override: Option<PathBuf>) -> Result<PathBuf, CliError> {
     Ok(config_override.unwrap_or(AppPaths::discover()?.config_file))
+}
+
+fn lock_config_mutations(config_path: &Path) -> Result<MutationGuard, CliError> {
+    Ok(acquire_mutation_lock(
+        config_path,
+        DEFAULT_MUTATION_LOCK_TIMEOUT,
+    )?)
 }

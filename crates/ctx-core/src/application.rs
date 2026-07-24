@@ -7,10 +7,11 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::{
-    AppPaths, Config, ConfigError, DesktopPlacement, PathsError, RuntimeError, RuntimeState,
-    Service, SpaceError, SwitchError, SwitchPersistenceError, SwitchReport, SystemUrlOpener,
-    UrlError, UrlLaunchReport, UrlOpener, WindowBounds, WindowError, WindowInfo, WindowResolution,
-    WindowStatus, WorkspaceUrlStatus, capture_desktop_placement, current_boot_id, inspect_windows,
+    AppPaths, Config, ConfigError, DEFAULT_MUTATION_LOCK_TIMEOUT, DesktopPlacement, MutationGuard,
+    MutationLockError, PathsError, RuntimeError, RuntimeState, Service, SpaceError, SwitchError,
+    SwitchPersistenceError, SwitchReport, SystemUrlOpener, UrlError, UrlLaunchReport, UrlOpener,
+    WindowBounds, WindowError, WindowInfo, WindowResolution, WindowStatus, WorkspaceUrlStatus,
+    acquire_mutation_lock, capture_desktop_placement, current_boot_id, inspect_windows,
     launch_workspace_urls, list_all_windows, list_windows, resolve_window, save_switch_transaction,
     switch_workspace, workspace_url_statuses,
 };
@@ -92,6 +93,9 @@ pub enum CtxAppError {
     #[error(transparent)]
     Persistence(#[from] SwitchPersistenceError),
 
+    #[error(transparent)]
+    Mutation(#[from] MutationLockError),
+
     #[error("workspace '{name}' does not exist")]
     WorkspaceMissing { name: String },
 
@@ -116,6 +120,8 @@ impl CtxAppError {
             )) => "permission",
             Self::Switch(_) => "switch",
             Self::Persistence(_) => "persistence",
+            Self::Mutation(MutationLockError::Busy { .. }) => "busy",
+            Self::Mutation(_) => "mutation_lock",
             Self::WorkspaceMissing { .. } => "workspace_missing",
             Self::NoWindowsSelected => "no_windows_selected",
             Self::WindowNotSelectable { .. } => "window_not_selectable",
@@ -174,7 +180,15 @@ impl CtxApp {
         Ok(RuntimeState::load(&self.runtime_path)?.active_workspace)
     }
 
+    pub fn lock_mutations(&self) -> Result<MutationGuard, CtxAppError> {
+        Ok(acquire_mutation_lock(
+            &self.config_path,
+            DEFAULT_MUTATION_LOCK_TIMEOUT,
+        )?)
+    }
+
     pub fn switch_workspace(&self, name: &str) -> Result<SwitchReport, CtxAppError> {
+        let _guard = self.lock_mutations()?;
         self.switch_workspace_with(name, |config, state, name| {
             Ok(switch_workspace(config, state, name)?)
         })
@@ -185,6 +199,7 @@ impl CtxApp {
         name: &str,
         force: bool,
     ) -> Result<UrlLaunchReport, CtxAppError> {
+        let _guard = self.lock_mutations()?;
         let boot_id = current_boot_id()?;
         let mut opener = SystemUrlOpener;
         self.open_workspace_urls_with(name, force, &boot_id, &mut opener)
@@ -209,6 +224,7 @@ impl CtxApp {
         if window_ids.is_empty() {
             return Err(CtxAppError::NoWindowsSelected);
         }
+        let _guard = self.lock_mutations()?;
         let windows = list_all_windows()?;
         self.add_windows_to_workspace_with(workspace, window_ids, &windows, |id| {
             capture_desktop_placement(id)
@@ -216,6 +232,7 @@ impl CtxApp {
     }
 
     pub fn create_workspace(&self, name: &str) -> Result<CreateWorkspaceReport, CtxAppError> {
+        let _guard = self.lock_mutations()?;
         let mut config = Config::load(&self.config_path)?;
         let state = RuntimeState::load(&self.runtime_path)?;
         config.add_workspace(name, Vec::new())?;
@@ -227,6 +244,7 @@ impl CtxApp {
     }
 
     pub fn delete_workspace(&self, name: &str) -> Result<DeleteWorkspacesReport, CtxAppError> {
+        let _guard = self.lock_mutations()?;
         let mut config = Config::load(&self.config_path)?;
         let mut state = RuntimeState::load(&self.runtime_path)?;
         config.remove_workspace(name)?;
@@ -242,6 +260,7 @@ impl CtxApp {
     }
 
     pub fn delete_all_workspaces(&self) -> Result<DeleteWorkspacesReport, CtxAppError> {
+        let _guard = self.lock_mutations()?;
         let mut config = Config::load(&self.config_path)?;
         let mut state = RuntimeState::load(&self.runtime_path)?;
         let deleted: Vec<_> = config.workspaces.keys().cloned().collect();

@@ -1,6 +1,7 @@
 pub mod accessibility;
 pub mod application;
 pub mod config;
+pub mod mutation_lock;
 pub mod paths;
 pub mod persistence;
 pub mod recovery;
@@ -20,6 +21,9 @@ pub use application::{
     DeleteWorkspacesReport, WindowCandidate, WindowPickerOverview, WorkspaceOverview,
 };
 pub use config::{Config, ConfigError, Service, Workspace};
+pub use mutation_lock::{
+    DEFAULT_MUTATION_LOCK_TIMEOUT, MutationGuard, MutationLockError, acquire_mutation_lock,
+};
 pub use paths::{AppPaths, PathsError};
 pub use persistence::{SwitchPersistenceError, save_switch_transaction};
 pub use recovery::{
