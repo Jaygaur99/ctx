@@ -192,6 +192,9 @@ describe("Ctx popover", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Save context" }));
+    expect(api.editWorkspace).not.toHaveBeenCalled();
+    expect(within(dialog).getByText("Remove 1 tracked window?")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm removal & save" }));
 
     await waitFor(() => expect(api.editWorkspace).toHaveBeenCalledWith(
       "coding",
@@ -199,22 +202,133 @@ describe("Ctx popover", () => {
       ["https://docs.rs"],
       [42],
     ));
+    await waitFor(() => expect(api.getOverview.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(screen.queryByRole("dialog", { name: "Edit context" })).not.toBeInTheDocument();
   });
 
-  it("focuses the editor and confirms before discarding dirty changes with Escape", async () => {
+  it("traps focus, restores it on close, and confirms before discarding dirty changes", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    const editTrigger = screen.getAllByRole("button", { name: "Edit" })[0];
+    fireEvent.click(editTrigger);
+    const dialog = screen.getByRole("dialog", { name: "Edit context" });
+    const name = within(dialog).getByRole("textbox", { name: "Context name" });
+    expect(name).toHaveFocus();
+    expect(document.querySelector(".app-base")).toHaveAttribute("inert");
+    expect(document.querySelector(".app-base")).toHaveAttribute("aria-hidden", "true");
+    fireEvent.change(name, { target: { value: "deep-work" } });
+
+    const close = within(dialog).getByRole("button", { name: "Close context editor" });
+    const save = within(dialog).getByRole("button", { name: "Save context" });
+    close.focus();
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(save).toHaveFocus();
+    fireEvent.keyDown(save, { key: "Tab" });
+    expect(close).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(within(dialog).getByText("Discard unsaved changes?")).toBeInTheDocument();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Edit context" })).not.toBeInTheDocument();
+    expect(editTrigger).toHaveFocus();
+  });
+
+  it("removes and reorders URLs before saving", async () => {
+    api.getOverview.mockResolvedValue({
+      ...overview,
+      workspaces: overview.workspaces.map((workspace) => workspace.name === "coding"
+        ? {
+            ...workspace,
+            urls: ["https://one.test/", "https://two.test/"],
+            url_statuses: [
+              { url: "https://one.test/", state: "pending" as const },
+              { url: "https://two.test/", state: "pending" as const },
+            ],
+            windows: [],
+          }
+        : workspace),
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "Edit context" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Move URL 1 down" }));
+    expect(within(dialog).getByRole("textbox", { name: "URL 1" })).toHaveValue("https://two.test/");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove URL 1" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save context" }));
+
+    await waitFor(() => expect(api.editWorkspace).toHaveBeenCalledWith(
+      "coding",
+      "coding",
+      ["https://one.test/"],
+      [],
+    ));
+  });
+
+  it("disables editor controls while a save is in flight", async () => {
+    let finishSave: (() => void) | undefined;
+    api.editWorkspace.mockImplementation(() => new Promise((resolve) => {
+      finishSave = () => resolve({
+        previous_name: "coding",
+        workspace: "deep-work",
+        urls: [],
+        removed_windows: [],
+        already_absent_windows: [],
+        active_workspace: "deep-work",
+      });
+    }));
     render(<App />);
     await screen.findByRole("heading", { name: "coding" });
 
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
     const dialog = screen.getByRole("dialog", { name: "Edit context" });
     const name = within(dialog).getByRole("textbox", { name: "Context name" });
-    expect(name).toHaveFocus();
     fireEvent.change(name, { target: { value: "deep-work" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save context" }));
 
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(within(dialog).getByText("Discard unsaved changes?")).toBeInTheDocument();
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "Edit context" })).not.toBeInTheDocument();
+    expect(name).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Close context editor" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "＋ Add URL" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Saving…" })).toBeDisabled();
+
+    finishSave?.();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit context" })).not.toBeInTheDocument());
+  });
+
+  it("labels stale tracked windows and confirms their removal", async () => {
+    api.getOverview.mockResolvedValue({
+      ...overview,
+      workspaces: overview.workspaces.map((workspace) => workspace.name === "coding"
+        ? {
+            ...workspace,
+            windows: workspace.windows.map((window) => ({
+              ...window,
+              resolved_id: null,
+              pid: null,
+              state: "missing" as const,
+            })),
+          }
+        : workspace),
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "Edit context" });
+    expect(within(dialog).getByText("Code · missing")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save context" }));
+    expect(api.editWorkspace).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm removal & save" }));
+
+    await waitFor(() => expect(api.editWorkspace).toHaveBeenCalledWith(
+      "coding",
+      "coding",
+      [],
+      [42],
+    ));
   });
 
   it("keeps core validation failures inside the editor", async () => {

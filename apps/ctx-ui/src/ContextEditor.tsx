@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { editWorkspace, normalizeCommandError } from "./api";
 import type { CommandError, EditWorkspaceReport, WorkspaceOverview } from "./types";
 
@@ -11,11 +11,14 @@ export default function ContextEditor({
   workspace,
   onClose,
   onSaved,
+  returnFocus,
 }: {
   workspace: WorkspaceOverview;
   onClose: () => void;
   onSaved: (report: EditWorkspaceReport) => void;
+  returnFocus: HTMLButtonElement | null;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
   const [name, setName] = useState(workspace.name);
   const [urls, setUrls] = useState<UrlRow[]>(
     workspace.urls.map((value, id) => ({ id, value })),
@@ -25,6 +28,7 @@ export default function ContextEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<CommandError | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [confirmRemoval, setConfirmRemoval] = useState(false);
 
   const submittedUrls = useMemo(
     () => urls.map(({ value }) => value.trim()).filter(Boolean),
@@ -46,21 +50,45 @@ export default function ContextEditor({
     onClose();
   }, [confirmDiscard, dirty, onClose, saving]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") requestClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [requestClose]);
+  useEffect(() => () => {
+    if (returnFocus?.isConnected) returnFocus.focus();
+  }, [returnFocus]);
+
+  const resetConfirmations = () => {
+    setConfirmDiscard(false);
+    setConfirmRemoval(false);
+  };
+
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      requestClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+    ) ?? [])];
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const updateUrl = (id: number, value: string) => {
-    setConfirmDiscard(false);
+    resetConfirmations();
     setUrls((current) => current.map((row) => row.id === id ? { ...row, value } : row));
   };
 
   const moveUrl = (index: number, direction: -1 | 1) => {
-    setConfirmDiscard(false);
+    resetConfirmations();
     setUrls((current) => {
       const target = index + direction;
       if (target < 0 || target >= current.length) return current;
@@ -71,13 +99,13 @@ export default function ContextEditor({
   };
 
   const addUrl = () => {
-    setConfirmDiscard(false);
+    resetConfirmations();
     setUrls((current) => [...current, { id: nextUrlId, value: "" }]);
     setNextUrlId((current) => current + 1);
   };
 
   const toggleWindowRemoval = (id: number) => {
-    setConfirmDiscard(false);
+    resetConfirmations();
     setRemovedWindowIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
@@ -88,7 +116,12 @@ export default function ContextEditor({
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !dirty) return;
+    if (removedWindowIds.size > 0 && !confirmRemoval) {
+      setConfirmDiscard(false);
+      setConfirmRemoval(true);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -106,7 +139,14 @@ export default function ContextEditor({
   };
 
   return (
-    <section className="sheet sheet--compact" role="dialog" aria-modal="true" aria-labelledby="edit-context-title">
+    <section
+      ref={dialogRef}
+      className="sheet sheet--compact"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-context-title"
+      onKeyDown={handleDialogKeyDown}
+    >
       <header className="sheet-header">
         <div>
           <h2 id="edit-context-title">Edit context</h2>
@@ -122,9 +162,19 @@ export default function ContextEditor({
             <p>Click Close again to discard them, or keep editing.</p>
           </div>
         )}
+        {confirmRemoval && (
+          <div className="banner banner--warning" role="alert">
+            <strong>
+              Remove {removedWindowIds.size} tracked window{removedWindowIds.size === 1 ? "" : "s"}?
+            </strong>
+            <p>
+              This only stops tracking the selected window{removedWindowIds.size === 1 ? "" : "s"}; it never closes an app. Confirm to save.
+            </p>
+          </div>
+        )}
 
         <label className="field-label" htmlFor="edit-context-name">Context name</label>
-        <input id="edit-context-name" className="text-field" value={name} disabled={saving} autoFocus onChange={(event) => { setConfirmDiscard(false); setName(event.target.value); }} />
+        <input id="edit-context-name" className="text-field" value={name} disabled={saving} autoFocus onChange={(event) => { resetConfirmations(); setName(event.target.value); }} />
 
         <div className="editor-heading">
           <div><strong>URLs</strong><span>Opened during context switches, in this order.</span></div>
@@ -138,7 +188,7 @@ export default function ContextEditor({
               <div className="row-buttons">
                 <button type="button" className="mini-button" aria-label={`Move URL ${index + 1} up`} disabled={saving || index === 0} onClick={() => moveUrl(index, -1)}>↑</button>
                 <button type="button" className="mini-button" aria-label={`Move URL ${index + 1} down`} disabled={saving || index === urls.length - 1} onClick={() => moveUrl(index, 1)}>↓</button>
-                <button type="button" className="mini-button mini-button--danger" aria-label={`Remove URL ${index + 1}`} disabled={saving} onClick={() => { setConfirmDiscard(false); setUrls((current) => current.filter((candidate) => candidate.id !== row.id)); }}>×</button>
+                <button type="button" className="mini-button mini-button--danger" aria-label={`Remove URL ${index + 1}`} disabled={saving} onClick={() => { resetConfirmations(); setUrls((current) => current.filter((candidate) => candidate.id !== row.id)); }}>×</button>
               </div>
             </div>
           ))}
@@ -154,7 +204,15 @@ export default function ContextEditor({
             return (
               <div className={`window-editor-row${removing ? " window-editor-row--removing" : ""}`} key={window.saved_id}>
                 <div><strong>{window.title ?? "Untitled window"}</strong><span>{window.owner} · {window.state}</span></div>
-                <button type="button" className={`button${removing ? " button--danger" : ""}`} disabled={saving} onClick={() => toggleWindowRemoval(window.saved_id)}>{removing ? "Keep" : "Remove"}</button>
+                <button
+                  type="button"
+                  className={`button${removing ? " button--danger" : ""}`}
+                  aria-pressed={removing}
+                  disabled={saving}
+                  onClick={() => toggleWindowRemoval(window.saved_id)}
+                >
+                  {removing ? "Keep" : "Remove"}
+                </button>
               </div>
             );
           })}
@@ -162,7 +220,9 @@ export default function ContextEditor({
 
         <div className="sheet-actions">
           <button type="button" className="button" disabled={saving} onClick={requestClose}>{confirmDiscard ? "Discard changes" : "Cancel"}</button>
-          <button type="submit" className="button button--primary" disabled={saving || !name.trim() || !dirty}>{saving ? "Saving…" : "Save context"}</button>
+          <button type="submit" className="button button--primary" disabled={saving || !name.trim() || !dirty}>
+            {saving ? "Saving…" : confirmRemoval ? "Confirm removal & save" : "Save context"}
+          </button>
         </div>
       </form>
     </section>

@@ -63,16 +63,18 @@ Completed and independently verified on 2026-07-24. The core-only slice passes t
 
 ## Step 3 — Add an In-Popover Context Editor
 
-- [ ] Add an explicit Edit action to each context card.
-- [ ] Present editing as a sheet inside the transient popover, consistent with Create, Delete, and Add Windows.
-- [ ] Allow renaming the context, removing individual tracked windows, and adding/removing/reordering URLs.
-- [ ] Keep window discovery in the existing Add Windows picker rather than duplicating it in the editor.
-- [ ] Confirm destructive window removal and dirty-sheet dismissal where necessary.
-- [ ] Disable conflicting controls while saving and show core validation or persistence errors inline.
-- [ ] Refresh from disk after every completed mutation.
-- [ ] Add keyboard, focus, light/dark, empty, stale, success, and failure coverage.
+- [x] Add an explicit Edit action to each context card.
+- [x] Present editing as a sheet inside the transient popover, consistent with Create, Delete, and Add Windows.
+- [x] Allow renaming the context, removing individual tracked windows, and adding/removing/reordering URLs.
+- [x] Keep window discovery in the existing Add Windows picker rather than duplicating it in the editor.
+- [x] Confirm destructive window removal and dirty-sheet dismissal where necessary.
+- [x] Disable conflicting controls while saving and show core validation or persistence errors inline.
+- [x] Refresh from disk after every completed mutation.
+- [x] Add keyboard, focus, light/dark, empty, stale, success, and failure coverage.
 
 Done when a user can create, maintain, and switch contexts entirely from the menu bar.
+
+Completed and verified on 2026-07-24. The editor uses the shared core mutation path, explicitly confirms tracked-window removal and dirty dismissal, isolates focus inside the sheet, refreshes after saves, and passes frontend, production-build, Rust workspace, and strict Clippy verification.
 
 ## Step 4 — Add Minimal App Settings
 

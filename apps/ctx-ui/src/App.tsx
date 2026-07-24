@@ -31,7 +31,7 @@ type SheetState =
   | { kind: "create" }
   | { kind: "delete" }
   | { kind: "windows"; workspace: string }
-  | { kind: "edit"; workspace: string }
+  | { kind: "edit"; workspace: string; returnFocus: HTMLButtonElement }
   | null;
 type Tone = "neutral" | "good" | "warning" | "danger" | "accent";
 
@@ -212,7 +212,7 @@ function WorkspaceCard({
   onSwitch: (name: string) => void;
   onOpenUrls: (name: string) => void;
   onAddWindows: (name: string) => void;
-  onEdit: (name: string) => void;
+  onEdit: (name: string, trigger: HTMLButtonElement) => void;
 }) {
   const isBusy = busy?.workspace === workspace.name;
   return (
@@ -236,7 +236,7 @@ function WorkspaceCard({
       </div>
 
       <div className="workspace-actions">
-        <button className="button" disabled={busy !== null} onClick={() => onEdit(workspace.name)}>
+        <button className="button" disabled={busy !== null} onClick={(event) => onEdit(workspace.name, event.currentTarget)}>
           Edit
         </button>
         <button
@@ -576,7 +576,8 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <header className="app-header">
+      <div className="app-base" inert={sheet !== null ? true : undefined} aria-hidden={sheet !== null ? true : undefined}>
+        <header className="app-header">
         <div>
           <div className="brand-row">
             <span className="brand-mark">C</span>
@@ -595,9 +596,9 @@ export default function App() {
             <span className={refreshing ? "spin" : ""}>↻</span>
           </button>
         </div>
-      </header>
+        </header>
 
-      <section className="content" aria-live="polite">
+        <section className="content" aria-live="polite">
         {error && <ErrorBanner error={error} onRetry={() => void refresh()} />}
         {partialFailures.length > 0 && <PartialFailureBanner failures={partialFailures} />}
         {staleActive && (
@@ -623,17 +624,18 @@ export default function App() {
               onSwitch={(name) => void runWorkspaceAction(name, "switch")}
               onOpenUrls={(name) => void runWorkspaceAction(name, "open")}
               onAddWindows={openWindowPicker}
-              onEdit={(name) => setSheet({ kind: "edit", workspace: name })}
+              onEdit={(name, returnFocus) => setSheet({ kind: "edit", workspace: name, returnFocus })}
             />
           ))}
         </div>
-      </section>
+        </section>
 
-      <footer className="app-footer">
-        <button className="text-button" disabled={refreshing || busy !== null} onClick={() => void refresh()}>Refresh</button>
-        <span>{busy ? `${busy.action === "switch" ? "Switching" : "Opening"} ${busy.workspace}…` : "Changes save automatically"}</span>
-        <button className="text-button text-button--danger" onClick={() => void quitCtx()}>Quit</button>
-      </footer>
+        <footer className="app-footer">
+          <button className="text-button" disabled={refreshing || busy !== null} onClick={() => void refresh()}>Refresh</button>
+          <span>{busy ? `${busy.action === "switch" ? "Switching" : "Opening"} ${busy.workspace}…` : "Changes save automatically"}</span>
+          <button className="text-button text-button--danger" onClick={() => void quitCtx()}>Quit</button>
+        </footer>
+      </div>
 
       {sheet?.kind === "create" && (
         <CreateContextSheet onClose={() => setSheet(null)} onCreated={(report) => void contextCreated(report)} />
@@ -658,6 +660,7 @@ export default function App() {
           workspace={editedWorkspace}
           onClose={() => setSheet(null)}
           onSaved={() => void contextEdited()}
+          returnFocus={sheet.returnFocus}
         />
       )}
     </main>
