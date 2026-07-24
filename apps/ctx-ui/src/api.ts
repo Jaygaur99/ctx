@@ -24,6 +24,7 @@ export const hideAllExceptActive = () =>
   invoke<HideAllReport>("hide_all_except_active");
 export const hidePopover = () => invoke<void>("hide_popover");
 export const showPopover = () => invoke<void>("show_popover");
+export const restartCtx = () => invoke<void>("restart_ctx");
 export const getWindowCandidates = (workspace: string) =>
   invoke<WindowPickerOverview>("get_window_candidates", { workspace });
 export const addWindowsToWorkspace = (workspace: string, windowIds: number[]) =>

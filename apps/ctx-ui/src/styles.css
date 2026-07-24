@@ -368,6 +368,7 @@ button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); 
 .settings-card { align-items: flex-start; }
 .settings-card--permission { flex-direction: column; }
 .settings-card--permission > .button { align-self: flex-start; }
+.settings-card--update > div { flex: 1; }
 .settings-card__heading {
   display: flex;
   align-items: flex-start;

@@ -56,16 +56,20 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/ctx-ui
           tagName: ${{ github.ref_name }}
           releaseName: Ctx ${{ github.ref_name }}
           releaseBody: |
-            Download the Ctx app bundle below, extract it, and move Ctx.app to Applications.
+            Download the Ctx DMG below, open it, and move Ctx.app to Applications.
+
+            Ctx 1.0 and newer can check for future signed updates from Settings.
 
             This build is ad-hoc signed but not Apple-notarized. macOS may require first-launch approval in Privacy & Security.
           generateReleaseNotes: true
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
-          uploadUpdaterJson: false
+          uploadUpdaterJson: true
           args: --target universal-apple-darwin

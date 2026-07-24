@@ -351,6 +351,11 @@ fn show_popover(app: AppHandle) -> Result<(), CommandError> {
     reveal_current_popover(&app)
 }
 
+#[tauri::command]
+fn restart_ctx(app: AppHandle) {
+    app.restart();
+}
+
 fn reveal_current_popover(app: &AppHandle) -> Result<(), CommandError> {
     let rect = app
         .tray_by_id(TRAY_ID)
@@ -467,6 +472,7 @@ fn template_tray_icon() -> Image<'static> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -536,6 +542,7 @@ fn main() {
             open_settings_target,
             hide_popover,
             show_popover,
+            restart_ctx,
             quit,
         ])
         .run(tauri::generate_context!())

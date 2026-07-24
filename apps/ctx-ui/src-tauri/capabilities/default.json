@@ -3,5 +3,5 @@
   "identifier": "popover-capability",
   "description": "Minimal capability for the Ctx menu-bar popover",
   "windows": ["popover"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "updater:default"]
 }

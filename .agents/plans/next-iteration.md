@@ -120,7 +120,12 @@ Completed and verified on 2026-07-24. Repeated context actions now have distinct
 
 ## Step 8 - Add auto updater using tauri auto update and release it.
 
-- [ ] Bump every package/app version together and publish v1.0 through the tag-only release workflow.
+- [x] Add Tauri's signed updater plugin and scope its capability to the menu-bar popover.
+- [x] Embed the public verification key and use the latest GitHub Release manifest as the update endpoint.
+- [x] Check for updates from Settings and let the user explicitly download, install, and restart.
+- [x] Generate signed updater artifacts and `latest.json` in the tag-only GitHub release workflow.
+- [x] Bump every package and app version together to v1.0.0.
+- [ ] Publish the `v1.0.0` tag and verify the GitHub Release assets.
 
 ## Step 9 — Verify and Merge into `main`
 

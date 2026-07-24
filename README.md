@@ -32,6 +32,7 @@ The app lives entirely in the menu bar. It has no normal main window, Dock icon,
 - **Durable app recovery.** Capture richer state for VS Code, Antigravity, Warp, and Firefox; other apps use a generic relaunch fallback.
 - **CLI and JSON output.** Inspect and control the same workspaces from scripts and the terminal.
 - **Local-first storage.** Configuration and runtime markers stay on your Mac. Ctx has no account or hosted service.
+- **Signed updates.** Check GitHub Releases from Settings, then download, verify, install, and restart in place.
 
 ## Requirements
 
@@ -43,8 +44,8 @@ macOS prompts for these permissions when they are first needed. You can review t
 
 ## Install the menu-bar app
 
-1. Download the macOS `.app.tar.gz` asset from the [latest GitHub Release](https://github.com/Jaygaur99/ctx/releases/latest).
-2. Extract it and move `Ctx.app` into `/Applications`.
+1. Download the macOS `.dmg` asset from the [latest GitHub Release](https://github.com/Jaygaur99/ctx/releases/latest).
+2. Open it and move `Ctx.app` into `/Applications`.
 3. Open Ctx. Its icon appears in the menu bar; no normal window opens.
 4. Grant Screen Recording and Accessibility access when macOS asks.
 
@@ -199,18 +200,18 @@ npm run tauri build -- --target universal-apple-darwin
 
 ## Releases
 
-The release workflow runs **only** when a version tag matching `v*` is pushed. It builds a universal macOS app for Apple Silicon and Intel, creates a GitHub Release, attaches the app bundle, and generates release notes.
+The release workflow runs **only** when a version tag matching `v*` is pushed. It builds a universal macOS app for Apple Silicon and Intel, creates a GitHub Release, signs and attaches the updater bundle, publishes `latest.json`, and generates release notes.
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-Branch pushes and pull requests do not run the release workflow.
+Branch pushes and pull requests do not run the release workflow. Starting with Ctx 1.0, use **Settings → Updates** to check for and install newer signed releases.
 
 ## Current scope
 
-Ctx currently supports macOS only. Auto-update, notifications, Developer ID signing/notarization, Git automation, services UI, and pause notes are planned for later iterations.
+Ctx currently supports macOS only. Notifications, Developer ID signing/notarization, Git automation, services UI, and pause notes are planned for later iterations.
 
 Issues and focused pull requests are welcome. Please keep platform behavior and persistence logic in `ctx-core` so the CLI and menu-bar app cannot drift apart.
 

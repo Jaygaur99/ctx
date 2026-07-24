@@ -9,10 +9,16 @@ const api = vi.hoisted(() => ({
   setLaunchAtLogin: vi.fn(),
 }));
 
+const updater = vi.hoisted(() => ({
+  checkForUpdate: vi.fn(),
+}));
+
 vi.mock("./api", () => ({
   ...api,
   normalizeCommandError: (error: unknown) => error,
 }));
+
+vi.mock("./updater", () => updater);
 
 const settings: AppSettings = {
   launch_at_login: false,
@@ -37,6 +43,7 @@ describe("Ctx settings", () => {
       ...settings,
       launch_at_login: true,
     });
+    updater.checkForUpdate.mockResolvedValue(null);
   });
 
   it("reports startup, permission, config, and build state", async () => {
@@ -48,6 +55,7 @@ describe("Ctx settings", () => {
     expect(screen.getByText(settings.config_folder)).toBeInTheDocument();
     expect(screen.getByText("Ctx 0.3.0")).toBeInTheDocument();
     expect(screen.getByText("Development build")).toBeInTheDocument();
+    expect(await screen.findByText("Ctx is up to date")).toBeInTheDocument();
   });
 
   it("persists and displays the verified launch-at-login state", async () => {
@@ -86,5 +94,44 @@ describe("Ctx settings", () => {
     await waitFor(() => expect(api.openSettingsTarget).toHaveBeenCalledWith("config_folder"));
     fireEvent.click(screen.getByRole("button", { name: "View Latest Release" }));
     await waitFor(() => expect(api.openSettingsTarget).toHaveBeenCalledWith("latest_release"));
+  });
+
+  it("finds and installs a signed update from settings", async () => {
+    const install = vi.fn(async (onProgress: (progress: {
+      downloadedBytes: number;
+      totalBytes: number | null;
+      percent: number | null;
+    }) => void) => {
+      onProgress({ downloadedBytes: 50, totalBytes: 100, percent: 50 });
+    });
+    updater.checkForUpdate.mockResolvedValue({
+      currentVersion: "1.0.0",
+      version: "1.0.1",
+      body: "Small fixes",
+      install,
+    });
+
+    render(<SettingsSheet onClose={vi.fn()} returnFocus={null} />);
+
+    expect(await screen.findByText("Ctx 1.0.1 is available")).toBeInTheDocument();
+    expect(screen.getByText("Small fixes")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Install Update" }));
+
+    await waitFor(() => expect(install).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Update installed")).toBeInTheDocument();
+  });
+
+  it("keeps updater failures separate and retryable", async () => {
+    updater.checkForUpdate.mockRejectedValue(new Error("release server unavailable"));
+
+    render(<SettingsSheet onClose={vi.fn()} returnFocus={null} />);
+
+    expect(await screen.findByText("Couldn’t check for updates")).toBeInTheDocument();
+    expect(screen.getByText("release server unavailable")).toBeInTheDocument();
+
+    updater.checkForUpdate.mockResolvedValue(null);
+    fireEvent.click(screen.getByRole("button", { name: "Check Again" }));
+
+    expect(await screen.findByText("Ctx is up to date")).toBeInTheDocument();
   });
 });

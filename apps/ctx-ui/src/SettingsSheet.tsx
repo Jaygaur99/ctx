@@ -7,6 +7,19 @@ import {
 } from "./api";
 import type { AppSettings, CommandError, SettingsTarget } from "./types";
 import { trapDialogFocus } from "./dialogFocus";
+import {
+  checkForUpdate,
+  type AvailableUpdate,
+  type UpdateProgress,
+} from "./updater";
+
+type UpdateStatus =
+  | "checking"
+  | "current"
+  | "available"
+  | "installing"
+  | "installed"
+  | "error";
 
 function PermissionRow({
   label,
@@ -58,6 +71,10 @@ export default function SettingsSheet({
   const [saving, setSaving] = useState(false);
   const [busyTarget, setBusyTarget] = useState<SettingsTarget | null>(null);
   const [error, setError] = useState<CommandError | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("checking");
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -74,6 +91,25 @@ export default function SettingsSheet({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const refreshUpdate = useCallback(async () => {
+    setUpdateStatus("checking");
+    setAvailableUpdate(null);
+    setUpdateProgress(null);
+    setUpdateError(null);
+    try {
+      const update = await checkForUpdate();
+      setAvailableUpdate(update);
+      setUpdateStatus(update ? "available" : "current");
+    } catch (cause) {
+      setUpdateError(normalizeCommandError(cause).message);
+      setUpdateStatus("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshUpdate();
+  }, [refreshUpdate]);
 
   useEffect(() => () => {
     if (returnFocus?.isConnected) returnFocus.focus();
@@ -116,6 +152,22 @@ export default function SettingsSheet({
     }
   };
 
+  const installUpdate = async () => {
+    if (!availableUpdate) return;
+    setUpdateStatus("installing");
+    setUpdateProgress(null);
+    setUpdateError(null);
+    try {
+      await availableUpdate.install(setUpdateProgress);
+      setUpdateStatus("installed");
+    } catch (cause) {
+      setUpdateError(normalizeCommandError(cause).message);
+      setUpdateStatus("available");
+    }
+  };
+
+  const installingUpdate = updateStatus === "installing";
+
   return (
     <section
       className="sheet sheet--compact"
@@ -132,7 +184,7 @@ export default function SettingsSheet({
         <button
           className="icon-button icon-button--close"
           aria-label="Close settings"
-          disabled={saving || busyTarget !== null}
+          disabled={saving || busyTarget !== null || installingUpdate}
           autoFocus
           onClick={close}
         >
@@ -215,6 +267,52 @@ export default function SettingsSheet({
                 >
                   {busyTarget === "config_folder" ? "Opening…" : "Open Config Folder"}
                 </button>
+              </div>
+            </section>
+
+            <section className="settings-section" aria-labelledby="update-settings-title">
+              <div className="settings-section__heading">
+                <h3 id="update-settings-title">Updates</h3>
+              </div>
+              <div className="settings-card settings-card--update">
+                <div>
+                  <strong>
+                    {updateStatus === "checking" && "Checking for updates…"}
+                    {updateStatus === "current" && "Ctx is up to date"}
+                    {updateStatus === "available" &&
+                      `Ctx ${availableUpdate?.version ?? ""} is available`}
+                    {updateStatus === "installing" && "Installing update…"}
+                    {updateStatus === "installed" && "Update installed"}
+                    {updateStatus === "error" && "Couldn’t check for updates"}
+                  </strong>
+                  <span>
+                    {updateStatus === "current" && `You’re running Ctx ${settings.version}.`}
+                    {updateStatus === "available" &&
+                      (updateError ?? availableUpdate?.body ?? "Ready to download and install.")}
+                    {updateStatus === "installing" &&
+                      (updateProgress?.percent != null
+                        ? `${updateProgress.percent}% downloaded`
+                        : "Downloading and verifying the signed update.")}
+                    {updateStatus === "installed" && "Ctx is restarting to finish the update."}
+                    {updateStatus === "error" && updateError}
+                    {updateStatus === "checking" && "Looking at the latest GitHub Release."}
+                  </span>
+                </div>
+                {updateStatus === "available" && (
+                  <button className="button button--primary" onClick={() => void installUpdate()}>
+                    {updateError ? "Retry Install" : "Install Update"}
+                  </button>
+                )}
+                {(updateStatus === "current" || updateStatus === "error") && (
+                  <button className="button" onClick={() => void refreshUpdate()}>
+                    Check Again
+                  </button>
+                )}
+                {updateStatus === "installing" && (
+                  <button className="button" disabled>
+                    Installing…
+                  </button>
+                )}
               </div>
             </section>
 
