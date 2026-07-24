@@ -102,6 +102,21 @@ button { color: inherit; }
 .header-button:hover:not(:disabled) { border-color: var(--accent); }
 .header-button--danger { color: var(--danger); }
 .header-button:disabled { cursor: default; opacity: 0.52; }
+.header-button--icon {
+  display: grid;
+  width: 30px;
+  padding: 0;
+  place-items: center;
+}
+.header-button--icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
 
 .icon-button {
   display: grid;
@@ -312,6 +327,84 @@ button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); 
 .window-editor-row strong, .window-editor-row span { display: block; }
 .window-editor-row strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .window-editor-row span { margin-top: 3px; color: var(--muted); font-size: 9px; text-transform: capitalize; }
+
+.settings-content { padding-top: 4px; }
+.settings-loading {
+  display: grid;
+  min-height: 340px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-section { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.settings-section:last-child { border-bottom: 0; }
+.settings-section__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin-bottom: 7px;
+}
+.settings-section__heading h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.settings-list { display: grid; gap: 7px; }
+.settings-card, .settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 58px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+.settings-card { align-items: flex-start; }
+.settings-card--permission { flex-direction: column; }
+.settings-card--permission > .button { align-self: flex-start; }
+.settings-card__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+.settings-card > div, .settings-card__heading > div, .settings-toggle > span { min-width: 0; }
+.settings-card strong, .settings-card span:not(.state-tag), .settings-card code,
+.settings-toggle strong, .settings-toggle small {
+  display: block;
+}
+.settings-card strong, .settings-toggle strong { font-size: 10px; }
+.settings-card span:not(.state-tag), .settings-toggle small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+.settings-card code {
+  max-width: 220px;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-card > .button { flex: none; }
+.settings-card__heading + .button { margin-top: 8px; }
+.settings-toggle input[role="switch"] {
+  width: 32px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.settings-toggle input[role="switch"]:disabled { cursor: default; opacity: 0.55; }
 
 .picker-toolbar {
   display: grid;

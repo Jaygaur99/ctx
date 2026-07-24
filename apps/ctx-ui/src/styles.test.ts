@@ -29,5 +29,6 @@ describe("popover appearance", () => {
     expect(styles).toContain(".sheet {");
     expect(styles).toContain(".url-editor-row {");
     expect(styles).toContain(".window-editor-row {");
+    expect(styles).toContain(".settings-card");
   });
 });

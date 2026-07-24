@@ -78,19 +78,22 @@ Completed and verified on 2026-07-24. The editor uses the shared core mutation p
 
 ## Step 4 — Add Minimal App Settings
 
-- [ ] Add a small Settings entry that opens a temporary hidden-by-default panel or sheet; choose the smallest usable presentation after a UI spike.
-- [ ] Add launch-at-login with an explicit toggle and truthful current-state reporting.
-- [ ] Show Screen Recording and Accessibility status with links or instructions to the relevant macOS settings.
-- [ ] Add Open Config Folder, version/build information, and a link to the current GitHub release.
-- [ ] Keep configuration editing and advanced workspace metadata out of this panel.
-- [ ] Ensure closing Settings returns Ctx to menu-bar-only behavior with no lingering application window.
-- [ ] Add tests for setting persistence, launch-at-login failures, permission states, and panel lifecycle.
+- [x] Add a small Settings entry that opens a temporary hidden-by-default panel or sheet; choose the smallest usable presentation after a UI spike.
+- [x] Add launch-at-login with an explicit toggle and truthful current-state reporting.
+- [x] Show Screen Recording and Accessibility status with links or instructions to the relevant macOS settings.
+- [x] Add Open Config Folder, version/build information, and a link to the current GitHub release.
+- [x] Keep configuration editing and advanced workspace metadata out of this panel.
+- [x] Ensure closing Settings returns Ctx to menu-bar-only behavior with no lingering application window.
+- [x] Add tests for setting persistence, launch-at-login failures, permission states, and panel lifecycle.
 
 Done when Ctx can start with the user and explain its own permissions without becoming a conventional desktop app.
+
+Completed and verified on 2026-07-24. Settings stays inside the transient popover, uses the official Tauri LaunchAgent integration, reports permissions without prompting, exposes only fixed help/file destinations, and passes frontend, production-build, Rust workspace, formatting, and strict Clippy verification.
 
 ## Step 5 — Polish, Verify, and Release v0.3
 
 - [ ] Resolve the highest-value usability findings from Step 0.
+- [ ] Add a persistent Simple Mode toggle that hides the Windows, Recovery, Placement, and URL diagnostics while keeping context names, active state, and everyday actions visible; keep Detailed Mode one action away.
 - [ ] Review popover density, labels, destructive-action language, keyboard navigation, and VoiceOver names.
 - [ ] Keep the current Ctx icon unless a deliberate brand redesign is requested.
 - [ ] Run Rust formatting, workspace tests, strict Clippy, frontend tests/type-check/build, and a universal Tauri bundle build.

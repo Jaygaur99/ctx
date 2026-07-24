@@ -14,6 +14,7 @@ import {
 } from "./api";
 import WindowPicker from "./WindowPicker";
 import ContextEditor from "./ContextEditor";
+import SettingsSheet from "./SettingsSheet";
 import type {
   AddWindowsReport,
   CommandError,
@@ -32,6 +33,7 @@ type SheetState =
   | { kind: "delete" }
   | { kind: "windows"; workspace: string }
   | { kind: "edit"; workspace: string; returnFocus: HTMLButtonElement }
+  | { kind: "settings"; returnFocus: HTMLButtonElement }
   | null;
 type Tone = "neutral" | "good" | "warning" | "danger" | "accent";
 
@@ -507,7 +509,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (sheet?.kind === "edit") return;
+      if (sheet?.kind === "edit" || sheet?.kind === "settings") return;
       if (sheet) setSheet(null);
       else void hidePopover();
     };
@@ -586,11 +588,27 @@ export default function App() {
           <p>{overview?.active_workspace ? `Active: ${overview.active_workspace}` : "No active workspace"}</p>
         </div>
         <div className="header-actions">
-          <button className="header-button" aria-label="Create context" disabled={busy !== null} onClick={() => setSheet({ kind: "create" })}>
-            <span aria-hidden="true">＋</span> Context
+          <button className="header-button header-button--icon" aria-label="Create context" title="Create context" disabled={busy !== null} onClick={() => setSheet({ kind: "create" })}>
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
           </button>
-          <button className="header-button header-button--danger" aria-label="Delete contexts" disabled={busy !== null || !overview?.workspaces.length} onClick={() => setSheet({ kind: "delete" })}>
-            Delete
+          <button className="header-button header-button--icon header-button--danger" aria-label="Delete contexts" title="Delete contexts" disabled={busy !== null || !overview?.workspaces.length} onClick={() => setSheet({ kind: "delete" })}>
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+            </svg>
+          </button>
+          <button
+            className="header-button header-button--icon"
+            aria-label="Settings"
+            title="Settings"
+            disabled={busy !== null}
+            onClick={(event) => setSheet({ kind: "settings", returnFocus: event.currentTarget })}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+              <path d="M19 13.5v-3l-2-.6a7 7 0 0 0-.8-1.8l1-1.9-2.1-2.1-1.9 1a7 7 0 0 0-1.8-.8L10.5 2h-3l-.6 2.1a7 7 0 0 0-1.8.8l-1.9-1-2.1 2.1 1 1.9a7 7 0 0 0-.8 1.8L0 10.5v3l2.1.6a7 7 0 0 0 .8 1.8l-1 1.9L4 19.9l1.9-1a7 7 0 0 0 1.8.8l.6 2.1h3l.6-2.1a7 7 0 0 0 1.8-.8l1.9 1 2.1-2.1-1-1.9a7 7 0 0 0 .8-1.8L19 13.5Z" transform="translate(2.5 0)" />
+            </svg>
           </button>
           <button className="icon-button" aria-label="Refresh workspaces" disabled={refreshing || busy !== null} onClick={() => void refresh()}>
             <span className={refreshing ? "spin" : ""}>↻</span>
@@ -660,6 +678,12 @@ export default function App() {
           workspace={editedWorkspace}
           onClose={() => setSheet(null)}
           onSaved={() => void contextEdited()}
+          returnFocus={sheet.returnFocus}
+        />
+      )}
+      {sheet?.kind === "settings" && (
+        <SettingsSheet
+          onClose={() => setSheet(null)}
           returnFocus={sheet.returnFocus}
         />
       )}

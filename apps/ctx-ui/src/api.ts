@@ -2,11 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AddWindowsReport,
+  AppSettings,
   CommandError,
   CreateWorkspaceReport,
   CtxOverview,
   DeleteWorkspacesReport,
   EditWorkspaceReport,
+  SettingsTarget,
   SwitchReport,
   UrlLaunchReport,
   WindowPickerOverview,
@@ -35,6 +37,11 @@ export const editWorkspace = (
   urls: string[],
   removeWindowIds: number[],
 ) => invoke<EditWorkspaceReport>("edit_workspace", { name, newName, urls, removeWindowIds });
+export const getAppSettings = () => invoke<AppSettings>("get_app_settings");
+export const setLaunchAtLogin = (enabled: boolean) =>
+  invoke<AppSettings>("set_launch_at_login", { enabled });
+export const openSettingsTarget = (target: SettingsTarget) =>
+  invoke<void>("open_settings_target", { target });
 export const quitCtx = () => invoke<void>("quit");
 export const onPopoverOpened = (handler: () => void): Promise<UnlistenFn> =>
   listen("ctx://popover-opened", handler);

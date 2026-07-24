@@ -65,15 +65,25 @@ pub enum AccessibilityError {
 }
 
 #[cfg(target_os = "macos")]
+pub fn accessibility_permission_granted() -> bool {
+    use accessibility_sys::AXIsProcessTrusted;
+
+    unsafe { AXIsProcessTrusted() }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn accessibility_permission_granted() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
 pub fn request_accessibility_permission() -> bool {
-    use accessibility_sys::{
-        AXIsProcessTrusted, AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt,
-    };
+    use accessibility_sys::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
     use core_foundation::{
         base::TCFType, boolean::CFBoolean, dictionary::CFDictionary, string::CFString,
     };
 
-    if unsafe { AXIsProcessTrusted() } {
+    if accessibility_permission_granted() {
         return true;
     }
 

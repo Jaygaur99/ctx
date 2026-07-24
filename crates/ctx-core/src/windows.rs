@@ -155,6 +155,18 @@ pub enum WindowError {
 }
 
 #[cfg(target_os = "macos")]
+pub fn screen_recording_permission_granted() -> bool {
+    use core_graphics::access::ScreenCaptureAccess;
+
+    ScreenCaptureAccess.preflight()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn screen_recording_permission_granted() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
 pub fn list_windows() -> Result<Vec<WindowInfo>, WindowError> {
     use core_graphics::window::{
         kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly,

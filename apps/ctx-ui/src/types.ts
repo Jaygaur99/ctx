@@ -122,3 +122,21 @@ export interface CommandError {
   code: string;
   message: string;
 }
+
+export interface AppSettings {
+  launch_at_login: boolean;
+  permissions: {
+    screen_recording: boolean;
+    accessibility: boolean;
+  };
+  config_folder: string;
+  version: string;
+  build: string;
+  release_url: string;
+}
+
+export type SettingsTarget =
+  | "screen_recording"
+  | "accessibility"
+  | "config_folder"
+  | "latest_release";

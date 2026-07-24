@@ -9,12 +9,15 @@ const api = vi.hoisted(() => ({
   deleteAllWorkspaces: vi.fn(),
   deleteWorkspace: vi.fn(),
   editWorkspace: vi.fn(),
+  getAppSettings: vi.fn(),
   getOverview: vi.fn(),
   getWindowCandidates: vi.fn(),
   hidePopover: vi.fn(),
   onPopoverOpened: vi.fn(),
   openWorkspaceUrls: vi.fn(),
+  openSettingsTarget: vi.fn(),
   quitCtx: vi.fn(),
+  setLaunchAtLogin: vi.fn(),
   showPopover: vi.fn(),
   switchWorkspace: vi.fn(),
 }));
@@ -71,6 +74,23 @@ describe("Ctx popover", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.getOverview.mockResolvedValue(overview);
+    api.getAppSettings.mockResolvedValue({
+      launch_at_login: false,
+      permissions: { screen_recording: true, accessibility: true },
+      config_folder: "/tmp/ctx",
+      version: "0.2.0",
+      build: "Development",
+      release_url: "https://github.com/Jaygaur99/ctx/releases/latest",
+    });
+    api.openSettingsTarget.mockResolvedValue(undefined);
+    api.setLaunchAtLogin.mockResolvedValue({
+      launch_at_login: true,
+      permissions: { screen_recording: true, accessibility: true },
+      config_folder: "/tmp/ctx",
+      version: "0.2.0",
+      build: "Development",
+      release_url: "https://github.com/Jaygaur99/ctx/releases/latest",
+    });
     api.hidePopover.mockResolvedValue(undefined);
     api.showPopover.mockResolvedValue(undefined);
     api.onPopoverOpened.mockResolvedValue(() => undefined);
@@ -371,5 +391,21 @@ describe("Ctx popover", () => {
     const dialog = screen.getByRole("dialog", { name: "Edit context" });
     expect(within(dialog).getByText("No URLs configured.")).toBeInTheDocument();
     expect(within(dialog).getByText("No windows tracked.")).toBeInTheDocument();
+  });
+
+  it("opens settings as a transient sheet and restores focus when it closes", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+    const trigger = screen.getByRole("button", { name: "Settings" });
+
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    expect(document.querySelector(".app-base")).toHaveAttribute("inert");
+    expect(await within(dialog).findByRole("switch", { name: "Launch at login" })).toBeInTheDocument();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
+    expect(document.querySelector(".app-base")).not.toHaveAttribute("inert");
+    expect(trigger).toHaveFocus();
   });
 });

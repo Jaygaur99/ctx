@@ -13,8 +13,9 @@ pub mod urls;
 pub mod windows;
 
 pub use accessibility::{
-    AccessibilityError, WindowActionFailure, WindowActionReport, close_windows, minimize_windows,
-    minimize_windows_best_effort, request_accessibility_permission, restore_windows,
+    AccessibilityError, WindowActionFailure, WindowActionReport, accessibility_permission_granted,
+    close_windows, minimize_windows, minimize_windows_best_effort,
+    request_accessibility_permission, restore_windows,
 };
 pub use application::{
     AddWindowsReport, CreateWorkspaceReport, CtxApp, CtxAppError, CtxOverview,
@@ -51,4 +52,5 @@ pub use windows::{
     BrowserTabState, DesktopPlacement, RecoveryKind, RecoveryState, TerminalTabState, WindowBounds,
     WindowError, WindowInfo, WindowResolution, WindowState, WindowStatus, inspect_windows,
     list_all_windows, list_windows, reconcile_windows, resolve_window,
+    screen_recording_permission_granted,
 };
