@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 interface TauriConfig {
   bundle: {
     targets: string[];
+    icon: string[];
     createUpdaterArtifacts: boolean;
   };
   plugins: {
@@ -28,6 +29,7 @@ const workflow = readFileSync(
 describe("signed release configuration", () => {
   it("builds an updater-enabled macOS app target alongside the DMG", () => {
     expect(config.bundle.targets).toEqual(["app", "dmg"]);
+    expect(config.bundle.icon).toContain("icons/icon.icns");
     expect(config.bundle.createUpdaterArtifacts).toBe(true);
   });
 
