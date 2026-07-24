@@ -50,14 +50,16 @@ Completed and independently verified on 2026-07-24. Rust workspace tests, strict
 
 ## Step 2 — Complete Context Editing
 
-- [ ] Add `ctx-core` APIs and typed reports to rename a context, remove selected windows, and manage its URLs.
-- [ ] Update active-workspace and URL runtime markers transactionally when a context is renamed.
-- [ ] Make window removal idempotent and never close the corresponding application window.
-- [ ] Validate and normalize HTTP/HTTPS URLs in core; support add, remove, and reorder without duplicates.
-- [ ] Preserve CLI output and exit semantics while routing equivalent commands through the shared facade.
-- [ ] Add core tests for rename collisions, active rename, stale window removal, URL normalization, ordering, and rollback.
+- [x] Add `ctx-core` APIs and typed reports to rename a context, remove selected windows, and manage its URLs.
+- [x] Update active-workspace and URL runtime markers transactionally when a context is renamed.
+- [x] Make window removal idempotent and never close the corresponding application window.
+- [x] Validate and normalize HTTP/HTTPS URLs in core; support add, remove, and reorder without duplicates.
+- [x] Preserve CLI output and exit semantics while routing equivalent commands through the shared facade.
+- [x] Add core tests for rename collisions, active rename, stale window removal, URL normalization, ordering, and rollback.
 
 Done when the complete everyday context definition can be maintained without hand-editing YAML.
+
+Completed and independently verified on 2026-07-24. The core-only slice passes the full Rust workspace suite and strict Clippy without exposing the editor in Tauri yet.
 
 ## Step 3 — Add an In-Popover Context Editor
 

@@ -54,6 +54,15 @@ export interface DeleteWorkspacesReport {
   active_workspace: string | null;
 }
 
+export interface EditWorkspaceReport {
+  previous_name: string;
+  workspace: string;
+  urls: string[];
+  removed_windows: number[];
+  already_absent_windows: number[];
+  active_workspace: string | null;
+}
+
 export interface WindowStatus {
   saved_id: number;
   resolved_id: number | null;

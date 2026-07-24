@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use ctx_core::{
     AddWindowsReport, CreateWorkspaceReport, CtxApp, CtxAppError, CtxOverview,
-    DeleteWorkspacesReport, SwitchReport, UrlLaunchReport, WindowPickerOverview,
+    DeleteWorkspacesReport, EditWorkspaceReport, SwitchReport, UrlLaunchReport,
+    WindowPickerOverview,
 };
 use serde::Serialize;
 use tauri::{
@@ -160,6 +161,20 @@ async fn delete_all_workspaces(
     state: State<'_, AppState>,
 ) -> Result<DeleteWorkspacesReport, CommandError> {
     run_core(state.inner().clone(), CtxApp::delete_all_workspaces).await
+}
+
+#[tauri::command]
+async fn edit_workspace(
+    name: String,
+    new_name: String,
+    urls: Vec<String>,
+    remove_window_ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<EditWorkspaceReport, CommandError> {
+    run_core(state.inner().clone(), move |core| {
+        core.edit_workspace(&name, &new_name, &urls, &remove_window_ids)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -346,6 +361,7 @@ fn main() {
             create_workspace,
             delete_workspace,
             delete_all_workspaces,
+            edit_workspace,
             hide_popover,
             show_popover,
             quit,

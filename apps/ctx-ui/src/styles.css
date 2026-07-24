@@ -257,6 +257,56 @@ button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); 
 .danger-zone p { margin: 4px 0 10px; color: var(--muted); font-size: 9px; line-height: 1.45; }
 .danger-zone .danger-confirmation { color: var(--danger); font-weight: 700; }
 
+.editor-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 8px;
+}
+.editor-heading > div { min-width: 0; }
+.editor-heading strong, .editor-heading span { display: block; }
+.editor-heading strong { font-size: 11px; }
+.editor-heading span { margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.editor-list { display: grid; gap: 7px; }
+.editor-empty { margin: 10px 0; color: var(--muted); font-size: 10px; text-align: center; }
+.url-editor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.row-buttons { display: flex; gap: 3px; }
+.mini-button {
+  width: 25px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+.mini-button:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.mini-button:disabled { cursor: default; opacity: 0.35; }
+.mini-button--danger { color: var(--danger); }
+.window-editor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+.window-editor-row--removing { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); opacity: 0.72; }
+.window-editor-row > div { min-width: 0; }
+.window-editor-row strong, .window-editor-row span { display: block; }
+.window-editor-row strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.window-editor-row span { margin-top: 3px; color: var(--muted); font-size: 9px; text-transform: capitalize; }
+
 .picker-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -151,6 +151,29 @@ impl RuntimeState {
         self.url_session.failures.remove(workspace);
     }
 
+    pub fn rename_workspace(&mut self, previous_name: &str, new_name: &str) {
+        if previous_name == new_name {
+            return;
+        }
+        if self.active_workspace.as_deref() == Some(previous_name) {
+            self.active_workspace = Some(new_name.to_string());
+        }
+        if let Some(opened) = self.url_session.opened.remove(previous_name) {
+            self.url_session
+                .opened
+                .entry(new_name.to_string())
+                .or_default()
+                .extend(opened);
+        }
+        if let Some(failures) = self.url_session.failures.remove(previous_name) {
+            self.url_session
+                .failures
+                .entry(new_name.to_string())
+                .or_default()
+                .extend(failures);
+        }
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self, RuntimeError> {
         let path = path.as_ref();
         let json = match fs::read_to_string(path) {
@@ -285,5 +308,27 @@ mod tests {
         state.clear_workspace_urls("coding");
         assert!(!state.url_was_opened("boot-1", "coding", "https://two.example/"));
         assert!(state.url_session.failures.is_empty());
+    }
+
+    #[test]
+    fn renaming_workspace_moves_active_state_and_url_markers() {
+        let mut state = RuntimeState {
+            active_workspace: Some("coding".to_string()),
+            ..RuntimeState::default()
+        };
+        state.ensure_url_boot_session("boot");
+        state.mark_url_opened("coding", "https://one.example/");
+        state.mark_url_failed("coding", "https://two.example/", "offline");
+
+        state.rename_workspace("coding", "deep-work");
+
+        assert_eq!(state.active_workspace.as_deref(), Some("deep-work"));
+        assert!(state.url_was_opened("boot", "deep-work", "https://one.example/"));
+        assert_eq!(
+            state.url_failure("boot", "deep-work", "https://two.example/"),
+            Some("offline")
+        );
+        assert!(!state.url_session.opened.contains_key("coding"));
+        assert!(!state.url_session.failures.contains_key("coding"));
     }
 }

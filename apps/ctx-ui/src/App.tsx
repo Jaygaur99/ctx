@@ -13,6 +13,7 @@ import {
   switchWorkspace,
 } from "./api";
 import WindowPicker from "./WindowPicker";
+import ContextEditor from "./ContextEditor";
 import type {
   AddWindowsReport,
   CommandError,
@@ -30,6 +31,7 @@ type SheetState =
   | { kind: "create" }
   | { kind: "delete" }
   | { kind: "windows"; workspace: string }
+  | { kind: "edit"; workspace: string }
   | null;
 type Tone = "neutral" | "good" | "warning" | "danger" | "accent";
 
@@ -203,12 +205,14 @@ function WorkspaceCard({
   onSwitch,
   onOpenUrls,
   onAddWindows,
+  onEdit,
 }: {
   workspace: WorkspaceOverview;
   busy: BusyAction;
   onSwitch: (name: string) => void;
   onOpenUrls: (name: string) => void;
   onAddWindows: (name: string) => void;
+  onEdit: (name: string) => void;
 }) {
   const isBusy = busy?.workspace === workspace.name;
   return (
@@ -232,6 +236,9 @@ function WorkspaceCard({
       </div>
 
       <div className="workspace-actions">
+        <button className="button" disabled={busy !== null} onClick={() => onEdit(workspace.name)}>
+          Edit
+        </button>
         <button
           className="button"
           disabled={busy !== null}
@@ -356,7 +363,7 @@ function CreateContextSheet({
           disabled={saving}
           onChange={(event) => setName(event.target.value)}
         />
-        <p className="field-help">The name must be unique. Paths, URLs, and other metadata can still be edited through the CLI.</p>
+        <p className="field-help">The name must be unique. You can add windows next, then maintain windows and URLs with Edit.</p>
         <div className="sheet-actions">
           <button type="button" className="button" disabled={saving} onClick={onClose}>Cancel</button>
           <button type="submit" className="button button--primary" disabled={!normalizedName || saving}>
@@ -500,6 +507,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (sheet?.kind === "edit") return;
       if (sheet) setSheet(null);
       else void hidePopover();
     };
@@ -556,7 +564,15 @@ export default function App() {
     await refresh();
   };
 
+  const contextEdited = async () => {
+    setSheet(null);
+    await refresh();
+  };
+
   const staleActive = overview?.active_workspace && !overview.workspaces.some((workspace) => workspace.active);
+  const editedWorkspace = sheet?.kind === "edit"
+    ? overview?.workspaces.find((workspace) => workspace.name === sheet.workspace)
+    : undefined;
 
   return (
     <main className="app-shell">
@@ -607,6 +623,7 @@ export default function App() {
               onSwitch={(name) => void runWorkspaceAction(name, "switch")}
               onOpenUrls={(name) => void runWorkspaceAction(name, "open")}
               onAddWindows={openWindowPicker}
+              onEdit={(name) => setSheet({ kind: "edit", workspace: name })}
             />
           ))}
         </div>
@@ -634,6 +651,13 @@ export default function App() {
           workspace={sheet.workspace}
           onClose={() => setSheet(null)}
           onAdded={(report) => void windowsAdded(report)}
+        />
+      )}
+      {sheet?.kind === "edit" && editedWorkspace && (
+        <ContextEditor
+          workspace={editedWorkspace}
+          onClose={() => setSheet(null)}
+          onSaved={() => void contextEdited()}
         />
       )}
     </main>

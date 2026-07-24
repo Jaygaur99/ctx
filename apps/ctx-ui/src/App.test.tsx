@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   createWorkspace: vi.fn(),
   deleteAllWorkspaces: vi.fn(),
   deleteWorkspace: vi.fn(),
+  editWorkspace: vi.fn(),
   getOverview: vi.fn(),
   getWindowCandidates: vi.fn(),
   hidePopover: vi.fn(),
@@ -77,6 +78,14 @@ describe("Ctx popover", () => {
     api.createWorkspace.mockResolvedValue({ workspace: "new-context", config_path: "/tmp/workspaces.yaml" });
     api.deleteWorkspace.mockResolvedValue({ deleted: ["coding"], active_workspace: null });
     api.deleteAllWorkspaces.mockResolvedValue({ deleted: ["coding", "research"], active_workspace: null });
+    api.editWorkspace.mockResolvedValue({
+      previous_name: "coding",
+      workspace: "deep-work",
+      urls: ["https://docs.rs/"],
+      removed_windows: [42],
+      already_absent_windows: [],
+      active_workspace: "deep-work",
+    });
     api.switchWorkspace.mockResolvedValue({
       urls: { workspace: "research", opened: [], already_opened: [], recovery_managed: [], failed: [] },
     });
@@ -166,5 +175,87 @@ describe("Ctx popover", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm delete all contexts" }));
 
     await waitFor(() => expect(api.deleteAllWorkspaces).toHaveBeenCalled());
+  });
+
+  it("edits a context definition through the shared core command", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "Edit context" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Context name" }), {
+      target: { value: "deep-work" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "＋ Add URL" }));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "URL 1" }), {
+      target: { value: "https://docs.rs" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save context" }));
+
+    await waitFor(() => expect(api.editWorkspace).toHaveBeenCalledWith(
+      "coding",
+      "deep-work",
+      ["https://docs.rs"],
+      [42],
+    ));
+  });
+
+  it("focuses the editor and confirms before discarding dirty changes with Escape", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "Edit context" });
+    const name = within(dialog).getByRole("textbox", { name: "Context name" });
+    expect(name).toHaveFocus();
+    fireEvent.change(name, { target: { value: "deep-work" } });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(within(dialog).getByText("Discard unsaved changes?")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Edit context" })).not.toBeInTheDocument();
+  });
+
+  it("keeps core validation failures inside the editor", async () => {
+    api.editWorkspace.mockRejectedValue({
+      code: "config",
+      message: "workspace 'research' already exists",
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "Edit context" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Context name" }), {
+      target: { value: "research" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save context" }));
+
+    expect(await within(dialog).findByText("workspace 'research' already exists")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Edit context" })).toBeInTheDocument();
+  });
+
+  it("renders clear empty states for a context without URLs or windows", async () => {
+    api.getOverview.mockResolvedValue({
+      ...overview,
+      active_workspace: "empty",
+      workspaces: [{
+        name: "empty",
+        active: true,
+        path: null,
+        services: [],
+        urls: [],
+        url_statuses: [],
+        windows: [],
+      }],
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "empty" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit context" });
+    expect(within(dialog).getByText("No URLs configured.")).toBeInTheDocument();
+    expect(within(dialog).getByText("No windows tracked.")).toBeInTheDocument();
   });
 });

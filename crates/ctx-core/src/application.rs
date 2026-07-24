@@ -12,8 +12,8 @@ use crate::{
     SwitchPersistenceError, SwitchReport, SystemUrlOpener, UrlError, UrlLaunchReport, UrlOpener,
     WindowBounds, WindowError, WindowInfo, WindowResolution, WindowStatus, WorkspaceUrlStatus,
     acquire_mutation_lock, capture_desktop_placement, current_boot_id, inspect_windows,
-    launch_workspace_urls, list_all_windows, list_windows, resolve_window, save_switch_transaction,
-    switch_workspace, workspace_url_statuses,
+    launch_workspace_urls, list_all_windows, list_windows, normalize_url, normalize_urls,
+    resolve_window, save_switch_transaction, switch_workspace, workspace_url_statuses,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -67,6 +67,16 @@ pub struct CreateWorkspaceReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DeleteWorkspacesReport {
     pub deleted: Vec<String>,
+    pub active_workspace: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EditWorkspaceReport {
+    pub previous_name: String,
+    pub workspace: String,
+    pub urls: Vec<String>,
+    pub removed_windows: Vec<u32>,
+    pub already_absent_windows: Vec<u32>,
     pub active_workspace: Option<String>,
 }
 
@@ -273,6 +283,78 @@ impl CtxApp {
         Ok(DeleteWorkspacesReport {
             deleted,
             active_workspace: None,
+        })
+    }
+
+    pub fn edit_workspace(
+        &self,
+        name: &str,
+        new_name: &str,
+        urls: &[String],
+        remove_window_ids: &[u32],
+    ) -> Result<EditWorkspaceReport, CtxAppError> {
+        let _guard = self.lock_mutations()?;
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err(ConfigError::EmptyWorkspaceName.into());
+        }
+
+        let normalized_urls = normalize_urls(urls)?;
+        let mut config = Config::load(&self.config_path)?;
+        let mut state = RuntimeState::load(&self.runtime_path)?;
+        if !config.workspaces.contains_key(name) {
+            return Err(CtxAppError::WorkspaceMissing {
+                name: name.to_string(),
+            });
+        }
+        if name != new_name && config.workspaces.contains_key(new_name) {
+            return Err(ConfigError::WorkspaceAlreadyExists {
+                name: new_name.to_string(),
+            }
+            .into());
+        }
+        let mut workspace = config
+            .workspaces
+            .remove(name)
+            .expect("workspace existence was checked above");
+
+        let requested: BTreeSet<u32> = remove_window_ids.iter().copied().collect();
+        let mut removed_windows = Vec::new();
+        workspace.windows.retain(|window| {
+            if requested.contains(&window.id) {
+                removed_windows.push(window.id);
+                false
+            } else {
+                true
+            }
+        });
+        let removed_set: BTreeSet<_> = removed_windows.iter().copied().collect();
+        let already_absent_windows = requested
+            .difference(&removed_set)
+            .copied()
+            .collect::<Vec<_>>();
+        let previous_urls: BTreeSet<_> = workspace
+            .urls
+            .iter()
+            .filter_map(|url| normalize_url(url).ok())
+            .collect();
+        let retained_urls: BTreeSet<_> = normalized_urls.iter().cloned().collect();
+        workspace.urls = normalized_urls.clone();
+        config.workspaces.insert(new_name.to_string(), workspace);
+
+        state.rename_workspace(name, new_name);
+        for removed_url in previous_urls.difference(&retained_urls) {
+            state.clear_workspace_url(new_name, removed_url);
+        }
+        save_switch_transaction(&config, &self.config_path, &state, &self.runtime_path)?;
+
+        Ok(EditWorkspaceReport {
+            previous_name: name.to_string(),
+            workspace: new_name.to_string(),
+            urls: normalized_urls,
+            removed_windows,
+            already_absent_windows,
+            active_workspace: state.active_workspace,
         })
     }
 
@@ -876,5 +958,139 @@ mod tests {
         let state = RuntimeState::load(runtime_path).unwrap();
         assert!(state.active_workspace.is_none());
         assert!(state.url_session.failures.is_empty());
+    }
+
+    #[test]
+    fn editing_workspace_renames_runtime_and_replaces_windows_and_urls_transactionally() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("workspaces.yaml");
+        let runtime_path = directory.path().join("runtime.json");
+        let mut config = Config::from_yaml(
+            "version: 1\nworkspaces:\n  coding:\n    urls:\n      - https://one.example\n      - https://remove.example\n",
+        )
+        .unwrap();
+        config
+            .workspaces
+            .get_mut("coding")
+            .unwrap()
+            .windows
+            .push(test_window(42, 7, "Code", "Ctx"));
+        config.save(&config_path).unwrap();
+        let mut state = RuntimeState {
+            active_workspace: Some("coding".to_string()),
+            ..RuntimeState::default()
+        };
+        state.ensure_url_boot_session("boot");
+        state.mark_url_opened("coding", "https://one.example/");
+        state.mark_url_failed("coding", "https://remove.example/", "offline");
+        state.save(&runtime_path).unwrap();
+        let app = CtxApp::from_paths(&config_path, &runtime_path);
+
+        let report = app
+            .edit_workspace(
+                "coding",
+                "deep-work",
+                &[
+                    " https://new.example ".to_string(),
+                    "https://one.example".to_string(),
+                    "https://new.example/".to_string(),
+                ],
+                &[42, 99],
+            )
+            .unwrap();
+
+        assert_eq!(report.removed_windows, vec![42]);
+        assert_eq!(report.already_absent_windows, vec![99]);
+        assert_eq!(
+            report.urls,
+            ["https://new.example/", "https://one.example/"]
+        );
+        let config = Config::load(&config_path).unwrap();
+        assert!(config.workspace("coding").is_none());
+        let workspace = config.workspace("deep-work").unwrap();
+        assert!(workspace.windows.is_empty());
+        assert_eq!(
+            workspace.urls,
+            ["https://new.example/", "https://one.example/"]
+        );
+        let state = RuntimeState::load(&runtime_path).unwrap();
+        assert_eq!(state.active_workspace.as_deref(), Some("deep-work"));
+        assert!(state.url_was_opened("boot", "deep-work", "https://one.example/"));
+        assert!(
+            state
+                .url_failure("boot", "deep-work", "https://remove.example/")
+                .is_none()
+        );
+
+        let repeated = app
+            .edit_workspace("deep-work", "deep-work", &workspace.urls, &[42])
+            .unwrap();
+        assert!(repeated.removed_windows.is_empty());
+        assert_eq!(repeated.already_absent_windows, vec![42]);
+    }
+
+    #[test]
+    fn editing_workspace_rejects_missing_sources_before_rename_collisions() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("workspaces.yaml");
+        let runtime_path = directory.path().join("runtime.json");
+        Config::from_yaml("version: 1\nworkspaces:\n  research: {}\n")
+            .unwrap()
+            .save(&config_path)
+            .unwrap();
+        let app = CtxApp::from_paths(&config_path, &runtime_path);
+
+        let error = app
+            .edit_workspace("missing", "research", &[], &[])
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CtxAppError::WorkspaceMissing { name } if name == "missing"
+        ));
+    }
+
+    #[test]
+    fn editing_workspace_validation_failures_do_not_change_persisted_files() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("workspaces.yaml");
+        let runtime_path = directory.path().join("runtime.json");
+        Config::from_yaml("version: 1\nworkspaces:\n  coding: {}\n  research: {}\n")
+            .unwrap()
+            .save(&config_path)
+            .unwrap();
+        RuntimeState {
+            active_workspace: Some("coding".to_string()),
+            ..RuntimeState::default()
+        }
+        .save(&runtime_path)
+        .unwrap();
+        let config_before = std::fs::read(&config_path).unwrap();
+        let runtime_before = std::fs::read(&runtime_path).unwrap();
+        let app = CtxApp::from_paths(&config_path, &runtime_path);
+
+        let collision = app
+            .edit_workspace("coding", "research", &[], &[])
+            .unwrap_err();
+        assert!(matches!(
+            collision,
+            CtxAppError::Config(ConfigError::WorkspaceAlreadyExists { .. })
+        ));
+
+        let invalid_url = app
+            .edit_workspace(
+                "coding",
+                "deep-work",
+                &["file:///tmp/not-allowed".to_string()],
+                &[],
+            )
+            .unwrap_err();
+        assert!(matches!(
+            invalid_url,
+            CtxAppError::Url(UrlError::UnsupportedScheme { .. })
+        ));
+
+        assert_eq!(std::fs::read(&config_path).unwrap(), config_before);
+        assert_eq!(std::fs::read(&runtime_path).unwrap(), runtime_before);
     }
 }

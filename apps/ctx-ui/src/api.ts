@@ -6,6 +6,7 @@ import type {
   CreateWorkspaceReport,
   CtxOverview,
   DeleteWorkspacesReport,
+  EditWorkspaceReport,
   SwitchReport,
   UrlLaunchReport,
   WindowPickerOverview,
@@ -28,6 +29,12 @@ export const deleteWorkspace = (name: string) =>
   invoke<DeleteWorkspacesReport>("delete_workspace", { name });
 export const deleteAllWorkspaces = () =>
   invoke<DeleteWorkspacesReport>("delete_all_workspaces");
+export const editWorkspace = (
+  name: string,
+  newName: string,
+  urls: string[],
+  removeWindowIds: number[],
+) => invoke<EditWorkspaceReport>("edit_workspace", { name, newName, urls, removeWindowIds });
 export const quitCtx = () => invoke<void>("quit");
 export const onPopoverOpened = (handler: () => void): Promise<UnlistenFn> =>
   listen("ctx://popover-opened", handler);
