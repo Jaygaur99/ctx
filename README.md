@@ -42,6 +42,17 @@ The app lives entirely in the menu bar. It has no normal main window, Dock icon,
 
 macOS prompts for these permissions when they are first needed. You can review them in **System Settings → Privacy & Security**. If a permission change does not take effect immediately, quit and reopen Ctx.
 
+### Known issue: permissions after an update
+
+After an in-place update, macOS may ask for Screen Recording or Accessibility permission
+again even though Ctx is already enabled in **System Settings → Privacy & Security**. The
+updated app can still report that permission is missing, and toggling the existing entry may
+not resolve it.
+
+If this happens, quit Ctx completely, remove the existing `Ctx.app`, install the latest
+release again, and grant the requested permissions. A future update should preserve these
+permissions without requiring a reinstall.
+
 ## Install the menu-bar app
 
 1. Download the macOS `.dmg` asset from the [latest GitHub Release](https://github.com/Jaygaur99/ctx/releases/latest).
