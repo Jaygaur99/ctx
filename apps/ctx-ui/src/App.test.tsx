@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   editWorkspace: vi.fn(),
   getAppSettings: vi.fn(),
   getOverview: vi.fn(),
+  hideAllExceptActive: vi.fn(),
   getWindowCandidates: vi.fn(),
   hidePopover: vi.fn(),
   onPopoverOpened: vi.fn(),
@@ -73,6 +74,7 @@ describe("Ctx popover", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     api.getOverview.mockResolvedValue(overview);
     api.getAppSettings.mockResolvedValue({
       launch_at_login: false,
@@ -92,6 +94,12 @@ describe("Ctx popover", () => {
       release_url: "https://github.com/Jaygaur99/ctx/releases/latest",
     });
     api.hidePopover.mockResolvedValue(undefined);
+    api.hideAllExceptActive.mockResolvedValue({
+      active_workspace: "coding",
+      protected: [42],
+      hidden: [73],
+      skipped: [],
+    });
     api.showPopover.mockResolvedValue(undefined);
     api.onPopoverOpened.mockResolvedValue(() => undefined);
     api.getWindowCandidates.mockResolvedValue({ workspace: "coding", windows: [] });
@@ -114,15 +122,61 @@ describe("Ctx popover", () => {
     });
   });
 
-  it("renders the active workspace first with detailed state", async () => {
+  it("defaults to simple mode and keeps detailed diagnostics one action away", async () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "coding" })).toBeInTheDocument();
     const headings = screen.getAllByRole("heading", { level: 2 });
     expect(headings.map((heading) => heading.textContent)).toEqual(["coding", "research"]);
+    expect(document.querySelector(".workspace-summary")).not.toBeInTheDocument();
+    expect(screen.queryByText("Details")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show detailed view" }));
     fireEvent.click(screen.getAllByText("Details")[0]);
     expect(screen.getByText("Ctx", { selector: ".detail-item strong" })).toBeInTheDocument();
     expect(screen.getByText("Desktop 2")).toBeInTheDocument();
+    expect(window.localStorage.getItem("ctx.simple-mode")).toBe("detailed");
+  });
+
+  it("restores the persisted view mode", async () => {
+    window.localStorage.setItem("ctx.simple-mode", "detailed");
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "coding" });
+    expect(document.querySelector(".workspace-summary")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use simple view" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("hides every other window while preserving the active context", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide all except active context" }));
+
+    await waitFor(() => expect(api.hideAllExceptActive).toHaveBeenCalledOnce());
+    expect(api.hidePopover).toHaveBeenCalled();
+    expect(api.hidePopover.mock.invocationCallOrder[0]).toBeLessThan(
+      api.hideAllExceptActive.mock.invocationCallOrder[0],
+    );
+    expect(api.showPopover).not.toHaveBeenCalled();
+  });
+
+  it("reopens the popover when a window cannot be hidden", async () => {
+    api.hideAllExceptActive.mockResolvedValue({
+      active_workspace: "coding",
+      protected: [42],
+      hidden: [],
+      skipped: [{ id: 73, owner: "Safari", error: "window is unavailable" }],
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide all except active context" }));
+
+    await waitFor(() => expect(api.showPopover).toHaveBeenCalled());
+    expect(await screen.findByText("1 window could not be hidden")).toBeInTheDocument();
+    expect(screen.getByText("Safari: window is unavailable")).toBeInTheDocument();
   });
 
   it("hides and switches through the typed API", async () => {

@@ -7,12 +7,13 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::{
-    AppPaths, Config, ConfigError, DEFAULT_MUTATION_LOCK_TIMEOUT, DesktopPlacement, MutationGuard,
-    MutationLockError, PathsError, RuntimeError, RuntimeState, Service, SpaceError, SwitchError,
-    SwitchPersistenceError, SwitchReport, SystemUrlOpener, UrlError, UrlLaunchReport, UrlOpener,
-    WindowBounds, WindowError, WindowInfo, WindowResolution, WindowStatus, WorkspaceUrlStatus,
-    acquire_mutation_lock, capture_desktop_placement, current_boot_id, inspect_windows,
-    launch_workspace_urls, list_all_windows, list_windows, normalize_url, normalize_urls,
+    AccessibilityError, AppPaths, Config, ConfigError, DEFAULT_MUTATION_LOCK_TIMEOUT,
+    DesktopPlacement, MutationGuard, MutationLockError, PathsError, RuntimeError, RuntimeState,
+    Service, SpaceError, SwitchError, SwitchPersistenceError, SwitchReport, SystemUrlOpener,
+    UrlError, UrlLaunchReport, UrlOpener, WindowActionFailure, WindowBounds, WindowError,
+    WindowInfo, WindowResolution, WindowStatus, WorkspaceUrlStatus, acquire_mutation_lock,
+    capture_desktop_placement, current_boot_id, inspect_windows, launch_workspace_urls,
+    list_all_windows, list_windows, minimize_windows_best_effort, normalize_url, normalize_urls,
     resolve_window, save_switch_transaction, switch_workspace, workspace_url_statuses,
 };
 
@@ -80,6 +81,14 @@ pub struct EditWorkspaceReport {
     pub active_workspace: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HideAllReport {
+    pub active_workspace: String,
+    pub protected: Vec<u32>,
+    pub hidden: Vec<u32>,
+    pub skipped: Vec<WindowActionFailure>,
+}
+
 #[derive(Debug, Error)]
 pub enum CtxAppError {
     #[error(transparent)]
@@ -93,6 +102,9 @@ pub enum CtxAppError {
 
     #[error(transparent)]
     Window(#[from] WindowError),
+
+    #[error(transparent)]
+    Accessibility(#[from] AccessibilityError),
 
     #[error(transparent)]
     Url(#[from] UrlError),
@@ -109,6 +121,9 @@ pub enum CtxAppError {
     #[error("workspace '{name}' does not exist")]
     WorkspaceMissing { name: String },
 
+    #[error("no active workspace; activate a context before hiding other windows")]
+    NoActiveWorkspace,
+
     #[error("select at least one window")]
     NoWindowsSelected,
 
@@ -124,6 +139,8 @@ impl CtxAppError {
             Self::Runtime(_) => "runtime",
             Self::Window(WindowError::ScreenRecordingPermissionRequired) => "permission",
             Self::Window(_) => "window_discovery",
+            Self::Accessibility(AccessibilityError::PermissionRequired) => "permission",
+            Self::Accessibility(_) => "window_action",
             Self::Url(_) => "url",
             Self::Switch(SwitchError::Accessibility(
                 crate::AccessibilityError::PermissionRequired,
@@ -133,6 +150,7 @@ impl CtxAppError {
             Self::Mutation(MutationLockError::Busy { .. }) => "busy",
             Self::Mutation(_) => "mutation_lock",
             Self::WorkspaceMissing { .. } => "workspace_missing",
+            Self::NoActiveWorkspace => "no_active_workspace",
             Self::NoWindowsSelected => "no_windows_selected",
             Self::WindowNotSelectable { .. } => "window_not_selectable",
         }
@@ -213,6 +231,27 @@ impl CtxApp {
         let boot_id = current_boot_id()?;
         let mut opener = SystemUrlOpener;
         self.open_workspace_urls_with(name, force, &boot_id, &mut opener)
+    }
+
+    pub fn hide_all_except_active(&self) -> Result<HideAllReport, CtxAppError> {
+        let _guard = self.lock_mutations()?;
+        let config = Config::load(&self.config_path)?;
+        let state = RuntimeState::load(&self.runtime_path)?;
+        let current_windows = list_all_windows()?;
+        let (active_workspace, protected, targets) = build_hide_all_targets(
+            &config,
+            &state,
+            &current_windows,
+            Some(std::process::id() as i32),
+        )?;
+        let report = minimize_windows_best_effort(&targets)?;
+
+        Ok(HideAllReport {
+            active_workspace,
+            protected,
+            hidden: report.affected,
+            skipped: report.skipped,
+        })
     }
 
     pub fn window_candidates(&self, workspace: &str) -> Result<WindowPickerOverview, CtxAppError> {
@@ -508,6 +547,45 @@ fn build_window_picker(
         workspace: workspace.to_string(),
         windows,
     })
+}
+
+fn build_hide_all_targets(
+    config: &Config,
+    state: &RuntimeState,
+    current_windows: &[WindowInfo],
+    excluded_pid: Option<i32>,
+) -> Result<(String, Vec<u32>, Vec<WindowInfo>), CtxAppError> {
+    let active_workspace = state
+        .active_workspace
+        .clone()
+        .ok_or(CtxAppError::NoActiveWorkspace)?;
+    let workspace =
+        config
+            .workspace(&active_workspace)
+            .ok_or_else(|| CtxAppError::WorkspaceMissing {
+                name: active_workspace.clone(),
+            })?;
+    let mut protected = BTreeSet::new();
+
+    for saved in &workspace.windows {
+        match resolve_window(saved, current_windows) {
+            WindowResolution::Resolved(current) => {
+                protected.insert(current.id);
+            }
+            WindowResolution::Ambiguous(candidates) => {
+                protected.extend(candidates.into_iter().map(|candidate| candidate.id));
+            }
+            WindowResolution::Missing => {}
+        }
+    }
+
+    let targets = current_windows
+        .iter()
+        .filter(|window| excluded_pid != Some(window.pid) && !protected.contains(&window.id))
+        .cloned()
+        .collect();
+
+    Ok((active_workspace, protected.into_iter().collect(), targets))
 }
 
 fn assignment_map(config: &Config, current_windows: &[WindowInfo]) -> BTreeMap<u32, Vec<String>> {
@@ -813,6 +891,68 @@ mod tests {
 
         let picker = build_window_picker(&config, "coding", &[own_panel], Some(200)).unwrap();
         assert!(picker.windows.is_empty());
+    }
+
+    #[test]
+    fn hide_all_targets_every_manageable_window_except_the_active_context() {
+        let saved_active = test_window(10, 100, "Code", "Ctx");
+        let resolved_active = test_window(11, 101, "Code", "Ctx");
+        let outside = test_window(20, 200, "Safari", "Docs");
+        let ignored = test_window(30, 300, "Notes", "Scratch");
+        let own_panel = test_window(40, 400, "Ctx", "Popover");
+        let mut workspaces = BTreeMap::new();
+        workspaces.insert(
+            "coding".to_string(),
+            Workspace {
+                path: None,
+                services: Vec::new(),
+                urls: Vec::new(),
+                windows: vec![saved_active],
+            },
+        );
+        let config = Config {
+            version: 1,
+            ignored_windows: vec![ignored.clone()],
+            workspaces,
+        };
+        let state = RuntimeState {
+            active_workspace: Some("coding".to_string()),
+            ..RuntimeState::default()
+        };
+
+        let (active, protected, targets) = build_hide_all_targets(
+            &config,
+            &state,
+            &[resolved_active, outside, ignored, own_panel],
+            Some(400),
+        )
+        .unwrap();
+
+        assert_eq!(active, "coding");
+        assert_eq!(protected, vec![11]);
+        assert_eq!(
+            targets.iter().map(|window| window.id).collect::<Vec<_>>(),
+            vec![20, 30]
+        );
+    }
+
+    #[test]
+    fn hide_all_requires_a_current_active_context() {
+        let config = Config::from_yaml("version: 1\nworkspaces:\n  coding: {}\n").unwrap();
+
+        let missing_active =
+            build_hide_all_targets(&config, &RuntimeState::default(), &[], None).unwrap_err();
+        assert!(matches!(missing_active, CtxAppError::NoActiveWorkspace));
+
+        let stale_state = RuntimeState {
+            active_workspace: Some("removed".to_string()),
+            ..RuntimeState::default()
+        };
+        let stale = build_hide_all_targets(&config, &stale_state, &[], None).unwrap_err();
+        assert!(matches!(
+            stale,
+            CtxAppError::WorkspaceMissing { name } if name == "removed"
+        ));
     }
 
     #[test]

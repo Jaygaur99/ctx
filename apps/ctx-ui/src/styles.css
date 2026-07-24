@@ -100,6 +100,7 @@ button { color: inherit; }
   font-weight: 700;
 }
 .header-button:hover:not(:disabled) { border-color: var(--accent); }
+.header-button[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); }
 .header-button--danger { color: var(--danger); }
 .header-button:disabled { cursor: default; opacity: 0.52; }
 .header-button--icon {

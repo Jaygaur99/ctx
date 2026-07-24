@@ -1,4 +1,4 @@
-# Ctx v0.3 — Next Iteration Handoff
+# Ctx v1.0 — Next Iteration Handoff
 
 ## Status
 
@@ -89,20 +89,40 @@ Completed and verified on 2026-07-24. The editor uses the shared core mutation p
 Done when Ctx can start with the user and explain its own permissions without becoming a conventional desktop app.
 
 Completed and verified on 2026-07-24. Settings stays inside the transient popover, uses the official Tauri LaunchAgent integration, reports permissions without prompting, exposes only fixed help/file destinations, and passes frontend, production-build, Rust workspace, formatting, and strict Clippy verification.
+## Step 5 — Add `hideAll` UI Controls
 
-## Step 5 — Polish, Verify, and Release v0.3
+- [x] Add a typed shared-core operation that minimizes every manageable window except windows resolved to the active context.
+- [x] Protect every candidate when an active-context window resolves ambiguously, and exclude the Ctx process itself.
+- [x] Add a popover control with disabled, success, partial-failure, and error behavior.
+- [x] Route the existing CLI command through the same shared operation.
+
+Completed and verified on 2026-07-24. Hide All now preserves only the active context, intentionally includes untracked and ignored windows, keeps the popover closed after a clean run, and reopens it with actionable feedback for skipped windows.
+
+## Step 6 — Add Simple Mode
+
+- [x] Default the context list to Simple Mode.
+- [x] Hide the Windows, Recovery, Placement, URL summary, and diagnostic details while keeping context identity, active state, and everyday actions visible.
+- [x] Keep Detailed Mode one button away and persist the preference locally.
+
+Completed and verified on 2026-07-24. Simple Mode is the default and its one-click Detailed Mode preference survives future popover sessions.
+
+## Step 7 — Polish, Verify v1.0
 
 - [ ] Resolve the highest-value usability findings from Step 0.
-- [ ] Add a persistent Simple Mode toggle that hides the Windows, Recovery, Placement, and URL diagnostics while keeping context names, active state, and everyday actions visible; keep Detailed Mode one action away.
 - [ ] Review popover density, labels, destructive-action language, keyboard navigation, and VoiceOver names.
 - [ ] Keep the current Ctx icon unless a deliberate brand redesign is requested.
 - [ ] Run Rust formatting, workspace tests, strict Clippy, frontend tests/type-check/build, and a universal Tauri bundle build.
 - [ ] Run `git diff --check` and `graphify update .`.
 - [ ] Repeat the real macOS acceptance pass on the built artifact.
 - [ ] Update the README for context editing and Settings behavior.
-- [ ] Bump every package/app version together and publish v0.3.0 through the tag-only release workflow.
+- [ ] Bump every package/app version together and publish v1.0 through the tag-only release workflow.
 
-Done when v0.3.0 is downloadable, documented, and verified through the same path users receive.
+## Step 8 - Add auto updater using tauri auto update and release it.
+
+## Step 9 - Verify and merge in main
+
+
+Done when v1.0 is downloadable, documented, and verified through the same path users receive.
 
 ## Still Deferred
 
@@ -110,16 +130,6 @@ Done when v0.3.0 is downloadable, documented, and verified through the same path
 - Service lifecycle controls.
 - Pause notes and handoff capture.
 - Notifications.
-- `hideAll` UI controls.
-- Auto-update.
-- Apple Developer ID signing, notarization, and DMG distribution until credentials and distribution goals are decided.
 - Broader workspace metadata editing beyond name, windows, and URLs.
-- Non-macOS UI support.
-
-## Tomorrow’s First Conversation
-
-1. What felt wrong or slow while using v0.2.0?
-2. Is context editing or launch-at-login more valuable for the next usable checkpoint?
-3. Do we want v0.3 to stay a focused daily-use release, or begin signed/notarized distribution work?
 
 Default recommendation: stabilize v0.2 first, then ship context editing and launch-at-login as a focused v0.3 without pulling Git, services, or pause notes into scope.

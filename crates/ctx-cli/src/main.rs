@@ -14,9 +14,9 @@ use ctx_core::{
     RuntimeState, UrlError, UrlLaunchReport, WindowInfo, WindowResolution, WindowState,
     WindowStatus, WorkspaceUrlState, WorkspaceUrlStatus, acquire_mutation_lock,
     add_urls_to_workspace, capture_desktop_placement, close_windows, current_boot_id,
-    default_recovery_registry, list_all_windows, list_spaces, list_windows,
-    minimize_windows_best_effort, reconcile_windows, remove_urls_from_workspace, resolve_window,
-    save_switch_transaction, snapshot_workspace, window_placement, workspace_url_statuses,
+    default_recovery_registry, list_all_windows, list_spaces, list_windows, reconcile_windows,
+    remove_urls_from_workspace, resolve_window, save_switch_transaction, snapshot_workspace,
+    window_placement, workspace_url_statuses,
 };
 use error::CliError;
 use serde_json::{Value, json};
@@ -369,48 +369,16 @@ fn print_url_launch_report(report: &UrlLaunchReport, json_output: bool) -> Resul
 }
 
 fn hide_all(config_override: Option<PathBuf>, json_output: bool) -> Result<(), CliError> {
-    let app_paths = AppPaths::discover()?;
-    let config_path = config_override.unwrap_or(app_paths.config_file);
-    let _guard = lock_config_mutations(&config_path)?;
-    let mut config = Config::load(&config_path)?;
-    let state = RuntimeState::load(app_paths.runtime_file)?;
-    let active_name = state.active_workspace.ok_or(CliError::NoActiveWorkspace)?;
-    let current_windows = list_all_windows()?;
-    let active =
-        config
-            .workspaces
-            .get_mut(&active_name)
-            .ok_or_else(|| CliError::WorkspaceMissing {
-                name: active_name.clone(),
-            })?;
-    let statuses = reconcile_windows(&mut active.windows, &current_windows);
-    ensure_windows_resolved(&active_name, &statuses)?;
-    let active_ids: std::collections::BTreeSet<_> =
-        active.windows.iter().map(|window| window.id).collect();
-    let ignored_statuses = reconcile_windows(&mut config.ignored_windows, &current_windows);
-    let ignored_ids: std::collections::BTreeSet<_> = ignored_statuses
-        .into_iter()
-        .filter_map(|status| status.resolved_id)
-        .collect();
-    let windows_to_hide: Vec<_> = current_windows
-        .into_iter()
-        .filter(|window| !active_ids.contains(&window.id) && !ignored_ids.contains(&window.id))
-        .collect();
-    let report = minimize_windows_best_effort(&windows_to_hide)?;
-
-    config.save(config_path)?;
+    let app = CtxApp::discover(config_override)?;
+    let report = app.hide_all_except_active()?;
 
     if json_output {
-        print_json(json!({
-            "active_workspace": active_name,
-            "hidden": report.affected,
-            "skipped": report.skipped,
-        }))?;
+        print_json(serde_json::to_value(&report)?)?;
     } else {
         println!(
             "Hid {} windows outside workspace '{}'.",
-            report.affected.len(),
-            active_name
+            report.hidden.len(),
+            report.active_workspace
         );
         for failure in report.skipped {
             println!(

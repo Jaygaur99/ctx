@@ -118,6 +118,19 @@ export interface SwitchReport {
   urls: UrlLaunchReport;
 }
 
+export interface WindowActionFailure {
+  id: number;
+  owner: string;
+  error: string;
+}
+
+export interface HideAllReport {
+  active_workspace: string;
+  protected: number[];
+  hidden: number[];
+  skipped: WindowActionFailure[];
+}
+
 export interface CommandError {
   code: string;
   message: string;

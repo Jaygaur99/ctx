@@ -4,6 +4,7 @@ import {
   deleteAllWorkspaces,
   deleteWorkspace,
   getOverview,
+  hideAllExceptActive,
   hidePopover,
   normalizeCommandError,
   onPopoverOpened,
@@ -22,12 +23,16 @@ import type {
   CtxOverview,
   DeleteWorkspacesReport,
   UrlLaunchFailure,
+  WindowActionFailure,
   WindowStatus,
   WorkspaceOverview,
   WorkspaceUrlStatus,
 } from "./types";
 
-type BusyAction = { workspace: string; action: "switch" | "open" } | null;
+type BusyAction =
+  | { workspace: string; action: "switch" | "open" }
+  | { action: "hide_all" }
+  | null;
 type SheetState =
   | { kind: "create" }
   | { kind: "delete" }
@@ -36,6 +41,15 @@ type SheetState =
   | { kind: "settings"; returnFocus: HTMLButtonElement }
   | null;
 type Tone = "neutral" | "good" | "warning" | "danger" | "accent";
+const SIMPLE_MODE_KEY = "ctx.simple-mode";
+
+function initialSimpleMode() {
+  try {
+    return window.localStorage.getItem(SIMPLE_MODE_KEY) !== "detailed";
+  } catch {
+    return true;
+  }
+}
 
 interface CountItem {
   label: string;
@@ -208,6 +222,7 @@ function WorkspaceCard({
   onOpenUrls,
   onAddWindows,
   onEdit,
+  showDiagnostics,
 }: {
   workspace: WorkspaceOverview;
   busy: BusyAction;
@@ -215,8 +230,9 @@ function WorkspaceCard({
   onOpenUrls: (name: string) => void;
   onAddWindows: (name: string) => void;
   onEdit: (name: string, trigger: HTMLButtonElement) => void;
+  showDiagnostics: boolean;
 }) {
-  const isBusy = busy?.workspace === workspace.name;
+  const isBusy = busy?.action !== "hide_all" && busy?.workspace === workspace.name;
   return (
     <article className={`workspace-card${workspace.active ? " workspace-card--active" : ""}`}>
       <div className="workspace-card__header">
@@ -230,12 +246,14 @@ function WorkspaceCard({
         {workspace.active && <StateTag tone="accent">Active</StateTag>}
       </div>
 
-      <div className="workspace-summary">
-        <StatusGroup label="Windows" items={windowCounts(workspace.windows)} />
-        <StatusGroup label="Recovery" items={recoveryCounts(workspace.windows)} />
-        <StatusGroup label="Placement" items={placementCounts(workspace.windows)} />
-        <StatusGroup label="URLs" items={urlCounts(workspace.url_statuses)} />
-      </div>
+      {showDiagnostics && (
+        <div className="workspace-summary">
+          <StatusGroup label="Windows" items={windowCounts(workspace.windows)} />
+          <StatusGroup label="Recovery" items={recoveryCounts(workspace.windows)} />
+          <StatusGroup label="Placement" items={placementCounts(workspace.windows)} />
+          <StatusGroup label="URLs" items={urlCounts(workspace.url_statuses)} />
+        </div>
+      )}
 
       <div className="workspace-actions">
         <button className="button" disabled={busy !== null} onClick={(event) => onEdit(workspace.name, event.currentTarget)}>
@@ -268,7 +286,7 @@ function WorkspaceCard({
         )}
       </div>
 
-      {(workspace.windows.length > 0 || workspace.url_statuses.length > 0) && (
+      {showDiagnostics && (workspace.windows.length > 0 || workspace.url_statuses.length > 0) && (
         <details className="workspace-details">
           <summary>Details</summary>
           {workspace.windows.length > 0 && (
@@ -304,6 +322,19 @@ function PartialFailureBanner({ failures }: { failures: UrlLaunchFailure[] }) {
     <div className="banner banner--warning" role="status">
       <strong>{failures.length} URL{failures.length === 1 ? "" : "s"} could not be opened</strong>
       {failures.map((failure) => <p key={failure.url}>{failure.url}: {failure.error}</p>)}
+    </div>
+  );
+}
+
+function WindowFailureBanner({ failures }: { failures: WindowActionFailure[] }) {
+  return (
+    <div className="banner banner--warning" role="status">
+      <strong>{failures.length} window{failures.length === 1 ? "" : "s"} could not be hidden</strong>
+      {failures.map((failure) => (
+        <p key={`${failure.owner}-${failure.id}`}>
+          {failure.owner}: {failure.error}
+        </p>
+      ))}
     </div>
   );
 }
@@ -472,9 +503,11 @@ export default function App() {
   const [overview, setOverview] = useState<CtxOverview | null>(null);
   const [error, setError] = useState<CommandError | null>(null);
   const [partialFailures, setPartialFailures] = useState<UrlLaunchFailure[]>([]);
+  const [windowFailures, setWindowFailures] = useState<WindowActionFailure[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<BusyAction>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
+  const [simpleMode, setSimpleMode] = useState(initialSimpleMode);
 
   const refresh = useCallback(async () => {
     if (busy) return;
@@ -529,6 +562,7 @@ export default function App() {
     setBusy({ workspace, action });
     setError(null);
     setPartialFailures([]);
+    setWindowFailures([]);
     await hidePopover().catch(() => undefined);
     try {
       const failures = action === "switch"
@@ -545,6 +579,39 @@ export default function App() {
       setError(normalizeCommandError(cause));
       await showPopover().catch(() => undefined);
     }
+  };
+
+  const runHideAll = async () => {
+    setBusy({ action: "hide_all" });
+    setError(null);
+    setPartialFailures([]);
+    setWindowFailures([]);
+    await hidePopover().catch(() => undefined);
+    try {
+      const report = await hideAllExceptActive();
+      setBusy(null);
+      await refresh();
+      if (report.skipped.length > 0) {
+        setWindowFailures(report.skipped);
+        await showPopover();
+      }
+    } catch (cause) {
+      setBusy(null);
+      setError(normalizeCommandError(cause));
+      await showPopover().catch(() => undefined);
+    }
+  };
+
+  const toggleSimpleMode = () => {
+    setSimpleMode((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(SIMPLE_MODE_KEY, next ? "simple" : "detailed");
+      } catch {
+        // The view still changes for this session if storage is unavailable.
+      }
+      return next;
+    });
   };
 
   const openWindowPicker = (workspace: string) => {
@@ -610,6 +677,30 @@ export default function App() {
               <path d="M19 13.5v-3l-2-.6a7 7 0 0 0-.8-1.8l1-1.9-2.1-2.1-1.9 1a7 7 0 0 0-1.8-.8L10.5 2h-3l-.6 2.1a7 7 0 0 0-1.8.8l-1.9-1-2.1 2.1 1 1.9a7 7 0 0 0-.8 1.8L0 10.5v3l2.1.6a7 7 0 0 0 .8 1.8l-1 1.9L4 19.9l1.9-1a7 7 0 0 0 1.8.8l.6 2.1h3l.6-2.1a7 7 0 0 0 1.8-.8l1.9 1 2.1-2.1-1-1.9a7 7 0 0 0 .8-1.8L19 13.5Z" transform="translate(2.5 0)" />
             </svg>
           </button>
+          <button
+            className="header-button header-button--icon"
+            aria-label={simpleMode ? "Show detailed view" : "Use simple view"}
+            title={simpleMode ? "Show detailed view" : "Use simple view"}
+            aria-pressed={!simpleMode}
+            disabled={busy !== null}
+            onClick={toggleSimpleMode}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <rect x="4" y="5" width="16" height="14" rx="2" />
+              <path d="M8 9h8M8 12h8M8 15h5" />
+            </svg>
+          </button>
+          <button
+            className="header-button header-button--icon"
+            aria-label="Hide all except active context"
+            title="Hide all except active context"
+            disabled={busy !== null || !overview?.active_workspace || Boolean(staleActive)}
+            onClick={() => void runHideAll()}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M3 3l18 18M10.6 10.7a2 2 0 0 0 2.7 2.7M9.9 4.3A10.6 10.6 0 0 1 12 4c5.5 0 9 5.5 9 5.5a16 16 0 0 1-2.1 2.6M6.6 6.6C4.4 8.1 3 10.5 3 10.5S6.5 16 12 16a9.6 9.6 0 0 0 3.4-.6" />
+            </svg>
+          </button>
           <button className="icon-button" aria-label="Refresh workspaces" disabled={refreshing || busy !== null} onClick={() => void refresh()}>
             <span className={refreshing ? "spin" : ""}>↻</span>
           </button>
@@ -619,6 +710,7 @@ export default function App() {
         <section className="content" aria-live="polite">
         {error && <ErrorBanner error={error} onRetry={() => void refresh()} />}
         {partialFailures.length > 0 && <PartialFailureBanner failures={partialFailures} />}
+        {windowFailures.length > 0 && <WindowFailureBanner failures={windowFailures} />}
         {staleActive && (
           <div className="banner banner--warning" role="status">
             <strong>Runtime state is stale</strong>
@@ -643,6 +735,7 @@ export default function App() {
               onOpenUrls={(name) => void runWorkspaceAction(name, "open")}
               onAddWindows={openWindowPicker}
               onEdit={(name, returnFocus) => setSheet({ kind: "edit", workspace: name, returnFocus })}
+              showDiagnostics={!simpleMode}
             />
           ))}
         </div>
@@ -650,7 +743,13 @@ export default function App() {
 
         <footer className="app-footer">
           <button className="text-button" disabled={refreshing || busy !== null} onClick={() => void refresh()}>Refresh</button>
-          <span>{busy ? `${busy.action === "switch" ? "Switching" : "Opening"} ${busy.workspace}…` : "Changes save automatically"}</span>
+          <span>
+            {busy?.action === "hide_all"
+              ? "Hiding other windows…"
+              : busy
+                ? `${busy.action === "switch" ? "Switching" : "Opening"} ${busy.workspace}…`
+                : "Changes save automatically"}
+          </span>
           <button className="text-button text-button--danger" onClick={() => void quitCtx()}>Quit</button>
         </footer>
       </div>

@@ -12,7 +12,7 @@ use std::{
 
 use ctx_core::{
     AddWindowsReport, CreateWorkspaceReport, CtxApp, CtxAppError, CtxOverview,
-    DeleteWorkspacesReport, EditWorkspaceReport, SwitchReport, UrlLaunchReport,
+    DeleteWorkspacesReport, EditWorkspaceReport, HideAllReport, SwitchReport, UrlLaunchReport,
     WindowPickerOverview, accessibility_permission_granted, screen_recording_permission_granted,
 };
 use serde::{Deserialize, Serialize};
@@ -159,6 +159,11 @@ async fn open_workspace_urls(
         core.open_workspace_urls(&name, true)
     })
     .await
+}
+
+#[tauri::command]
+async fn hide_all_except_active(state: State<'_, AppState>) -> Result<HideAllReport, CommandError> {
+    run_core(state.inner().clone(), CtxApp::hide_all_except_active).await
 }
 
 #[tauri::command]
@@ -519,6 +524,7 @@ fn main() {
             get_overview,
             switch_workspace,
             open_workspace_urls,
+            hide_all_except_active,
             get_window_candidates,
             add_windows_to_workspace,
             create_workspace,

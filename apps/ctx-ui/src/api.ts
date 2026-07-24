@@ -8,6 +8,7 @@ import type {
   CtxOverview,
   DeleteWorkspacesReport,
   EditWorkspaceReport,
+  HideAllReport,
   SettingsTarget,
   SwitchReport,
   UrlLaunchReport,
@@ -19,6 +20,8 @@ export const switchWorkspace = (name: string) =>
   invoke<SwitchReport>("switch_workspace", { name });
 export const openWorkspaceUrls = (name: string) =>
   invoke<UrlLaunchReport>("open_workspace_urls", { name });
+export const hideAllExceptActive = () =>
+  invoke<HideAllReport>("hide_all_except_active");
 export const hidePopover = () => invoke<void>("hide_popover");
 export const showPopover = () => invoke<void>("show_popover");
 export const getWindowCandidates = (workspace: string) =>

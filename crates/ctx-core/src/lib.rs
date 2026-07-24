@@ -19,8 +19,8 @@ pub use accessibility::{
 };
 pub use application::{
     AddWindowsReport, CreateWorkspaceReport, CtxApp, CtxAppError, CtxOverview,
-    DeleteWorkspacesReport, EditWorkspaceReport, WindowCandidate, WindowPickerOverview,
-    WorkspaceOverview,
+    DeleteWorkspacesReport, EditWorkspaceReport, HideAllReport, WindowCandidate,
+    WindowPickerOverview, WorkspaceOverview,
 };
 pub use config::{Config, ConfigError, Service, Workspace};
 pub use mutation_lock::{

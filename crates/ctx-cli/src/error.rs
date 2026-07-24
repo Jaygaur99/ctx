@@ -79,11 +79,13 @@ impl From<CtxAppError> for CliError {
             CtxAppError::Config(error) => Self::Config(error),
             CtxAppError::Runtime(error) => Self::Runtime(error),
             CtxAppError::Window(error) => Self::Window(error),
+            CtxAppError::Accessibility(error) => Self::Accessibility(error),
             CtxAppError::Url(error) => Self::Url(error),
             CtxAppError::Switch(error) => Self::Switch(error),
             CtxAppError::Persistence(error) => Self::SwitchPersistence(error),
             CtxAppError::Mutation(error) => Self::Mutation(error),
             CtxAppError::WorkspaceMissing { name } => Self::WorkspaceMissing { name },
+            CtxAppError::NoActiveWorkspace => Self::NoActiveWorkspace,
             CtxAppError::NoWindowsSelected => Self::NoWindowsSelected,
             CtxAppError::WindowNotSelectable { id } => Self::WindowNotSelectable { id },
         }
