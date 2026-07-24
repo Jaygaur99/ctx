@@ -28,7 +28,7 @@ The app lives entirely in the menu bar. It has no normal main window, Dock icon,
 - **Complete context editing in the UI.** Create, rename, or delete contexts; add or forget tracked windows; and add, remove, or reorder URLs without opening a conventional app window.
 - **Simple by default, detailed on demand.** Everyday actions stay compact while Detailed View exposes visible, minimized, missing, or ambiguous windows plus recovery, placement, and URL status.
 - **Hide everything else.** One menu-bar action minimizes every manageable window except the windows in the active context.
-- **Built-in settings.** Start Ctx at login, review Screen Recording and Accessibility status, open the configuration folder, and inspect the installed version.
+- **Built-in settings.** Choose Simple or Detailed View, follow the system appearance or select Light/Dark, start Ctx at login, review permissions, and inspect the installed version.
 - **Durable app recovery.** Capture richer state for VS Code, Antigravity, Warp, and Firefox; other apps use a generic relaunch fallback.
 - **CLI and JSON output.** Inspect and control the same workspaces from scripts and the terminal.
 - **Local-first storage.** Configuration and runtime markers stay on your Mac. Ctx has no account or hosted service.
@@ -59,7 +59,7 @@ Release builds are ad-hoc signed but are not yet Apple-notarized. On first launc
 4. Choose **Edit** on a context to rename it, maintain its URLs, or stop tracking selected windows.
 5. Create another context, then use **Switch** to move between them.
 6. Use **Hide all except active context** to minimize everything outside the active context.
-7. Toggle **Detailed View** when you need window, recovery, Desktop placement, or URL diagnostics.
+7. Turn off **Settings → Appearance → Simple view** when you need window, recovery, Desktop placement, or URL diagnostics.
 
 **Open URLs** always opens every configured URL for that context without changing the active context.
 

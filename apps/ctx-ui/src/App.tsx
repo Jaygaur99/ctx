@@ -24,6 +24,7 @@ import type {
   CtxOverview,
   DeleteWorkspacesReport,
   UrlLaunchFailure,
+  ThemePreference,
   WindowActionFailure,
   WindowStatus,
   WorkspaceOverview,
@@ -43,12 +44,22 @@ type SheetState =
   | null;
 type Tone = "neutral" | "good" | "warning" | "danger" | "accent";
 const SIMPLE_MODE_KEY = "ctx.simple-mode";
+const THEME_KEY = "ctx.theme";
 
 function initialSimpleMode() {
   try {
     return window.localStorage.getItem(SIMPLE_MODE_KEY) !== "detailed";
   } catch {
     return true;
+  }
+}
+
+function initialTheme(): ThemePreference {
+  try {
+    const stored = window.localStorage.getItem(THEME_KEY);
+    return stored === "light" || stored === "dark" ? stored : "system";
+  } catch {
+    return "system";
   }
 }
 
@@ -536,6 +547,7 @@ export default function App() {
   const [busy, setBusy] = useState<BusyAction>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
   const [simpleMode, setSimpleMode] = useState(initialSimpleMode);
+  const [theme, setTheme] = useState<ThemePreference>(initialTheme);
 
   const closeTransientSheet = useCallback(() => {
     const returnFocus = sheet?.returnFocus;
@@ -561,6 +573,18 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "system") root.removeAttribute("data-theme");
+    else root.dataset.theme = theme;
+
+    return () => {
+      if (theme === "system" || root.dataset.theme === theme) {
+        root.removeAttribute("data-theme");
+      }
+    };
+  }, [theme]);
 
   useEffect(() => {
     let disposed = false;
@@ -638,16 +662,23 @@ export default function App() {
     }
   };
 
-  const toggleSimpleMode = () => {
-    setSimpleMode((current) => {
-      const next = !current;
-      try {
-        window.localStorage.setItem(SIMPLE_MODE_KEY, next ? "simple" : "detailed");
-      } catch {
-        // The view still changes for this session if storage is unavailable.
-      }
-      return next;
-    });
+  const updateSimpleMode = (enabled: boolean) => {
+    setSimpleMode(enabled);
+    try {
+      window.localStorage.setItem(SIMPLE_MODE_KEY, enabled ? "simple" : "detailed");
+    } catch {
+      // The view still changes for this session if storage is unavailable.
+    }
+  };
+
+  const updateTheme = (preference: ThemePreference) => {
+    setTheme(preference);
+    try {
+      if (preference === "system") window.localStorage.removeItem(THEME_KEY);
+      else window.localStorage.setItem(THEME_KEY, preference);
+    } catch {
+      // The theme still changes for this session if storage is unavailable.
+    }
   };
 
   const openWindowPicker = (workspace: string, returnFocus: HTMLButtonElement) => {
@@ -717,19 +748,6 @@ export default function App() {
           </button>
           <button
             className="header-button header-button--icon"
-            aria-label="Detailed view"
-            title={simpleMode ? "Show detailed view" : "Use simple view"}
-            aria-pressed={!simpleMode}
-            disabled={busy !== null}
-            onClick={toggleSimpleMode}
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24">
-              <rect x="4" y="5" width="16" height="14" rx="2" />
-              <path d="M8 9h8M8 12h8M8 15h5" />
-            </svg>
-          </button>
-          <button
-            className="header-button header-button--icon"
             aria-label="Hide all except active context"
             title="Hide all except active context"
             disabled={busy !== null || !overview?.active_workspace || Boolean(staleActive)}
@@ -738,9 +756,6 @@ export default function App() {
             <svg aria-hidden="true" viewBox="0 0 24 24">
               <path d="M3 3l18 18M10.6 10.7a2 2 0 0 0 2.7 2.7M9.9 4.3A10.6 10.6 0 0 1 12 4c5.5 0 9 5.5 9 5.5a16 16 0 0 1-2.1 2.6M6.6 6.6C4.4 8.1 3 10.5 3 10.5S6.5 16 12 16a9.6 9.6 0 0 0 3.4-.6" />
             </svg>
-          </button>
-          <button className="icon-button" aria-label="Refresh workspaces" disabled={refreshing || busy !== null} onClick={() => void refresh()}>
-            <span className={refreshing ? "spin" : ""}>↻</span>
           </button>
         </div>
         </header>
@@ -822,6 +837,10 @@ export default function App() {
         <SettingsSheet
           onClose={() => setSheet(null)}
           returnFocus={sheet.returnFocus}
+          simpleMode={simpleMode}
+          theme={theme}
+          onSimpleModeChange={updateSimpleMode}
+          onThemeChange={updateTheme}
         />
       )}
     </main>

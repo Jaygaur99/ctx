@@ -23,10 +23,16 @@ const api = vi.hoisted(() => ({
   switchWorkspace: vi.fn(),
 }));
 
+const updater = vi.hoisted(() => ({
+  checkForUpdate: vi.fn(),
+}));
+
 vi.mock("./api", () => ({
   ...api,
   normalizeCommandError: (error: unknown) => error,
 }));
+
+vi.mock("./updater", () => updater);
 
 const overview: CtxOverview = {
   config_path: "/tmp/workspaces.yaml",
@@ -75,6 +81,8 @@ describe("Ctx popover", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    document.documentElement.removeAttribute("data-theme");
+    updater.checkForUpdate.mockResolvedValue(null);
     api.getOverview.mockResolvedValue(overview);
     api.getAppSettings.mockResolvedValue({
       launch_at_login: false,
@@ -122,7 +130,7 @@ describe("Ctx popover", () => {
     });
   });
 
-  it("defaults to simple mode and keeps detailed diagnostics one action away", async () => {
+  it("defaults to simple mode and keeps detailed diagnostics in settings", async () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "coding" })).toBeInTheDocument();
@@ -130,8 +138,16 @@ describe("Ctx popover", () => {
     expect(headings.map((heading) => heading.textContent)).toEqual(["coding", "research"]);
     expect(document.querySelector(".workspace-summary")).not.toBeInTheDocument();
     expect(screen.queryByText("Details")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh workspaces" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Detailed view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const settingsDialog = await screen.findByRole("dialog", { name: "Settings" });
+    const simpleView = within(settingsDialog).getByRole("switch", { name: "Simple view" });
+    expect(simpleView).toBeChecked();
+    fireEvent.click(simpleView);
+    fireEvent.click(within(settingsDialog).getByRole("button", { name: "Close settings" }));
+
     fireEvent.click(screen.getAllByText("Details")[0]);
     expect(screen.getByText("Ctx", { selector: ".detail-item strong" })).toBeInTheDocument();
     expect(screen.getByText("Desktop 2")).toBeInTheDocument();
@@ -145,7 +161,28 @@ describe("Ctx popover", () => {
 
     await screen.findByRole("heading", { name: "coding" });
     expect(document.querySelector(".workspace-summary")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Detailed view" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("switch", { name: "Simple view" })).not.toBeChecked();
+  });
+
+  it("uses the system theme by default and persists explicit appearance choices", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { name: "coding" });
+
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+    expect(window.localStorage.getItem("ctx.theme")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const theme = await screen.findByRole("combobox", { name: "Theme" });
+    expect(theme).toHaveValue("system");
+
+    fireEvent.change(theme, { target: { value: "light" } });
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    expect(window.localStorage.getItem("ctx.theme")).toBe("light");
+
+    fireEvent.change(theme, { target: { value: "system" } });
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+    expect(window.localStorage.getItem("ctx.theme")).toBeNull();
   });
 
   it("hides every other window while preserving the active context", async () => {

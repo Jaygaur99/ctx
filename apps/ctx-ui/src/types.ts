@@ -153,3 +153,5 @@ export type SettingsTarget =
   | "accessibility"
   | "config_folder"
   | "latest_release";
+
+export type ThemePreference = "system" | "light" | "dark";

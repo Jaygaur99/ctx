@@ -5,7 +5,12 @@ import {
   openSettingsTarget,
   setLaunchAtLogin,
 } from "./api";
-import type { AppSettings, CommandError, SettingsTarget } from "./types";
+import type {
+  AppSettings,
+  CommandError,
+  SettingsTarget,
+  ThemePreference,
+} from "./types";
 import { trapDialogFocus } from "./dialogFocus";
 import {
   checkForUpdate,
@@ -62,9 +67,17 @@ function PermissionRow({
 export default function SettingsSheet({
   onClose,
   returnFocus,
+  simpleMode,
+  theme,
+  onSimpleModeChange,
+  onThemeChange,
 }: {
   onClose: () => void;
   returnFocus: HTMLButtonElement | null;
+  simpleMode: boolean;
+  theme: ThemePreference;
+  onSimpleModeChange: (enabled: boolean) => void;
+  onThemeChange: (theme: ThemePreference) => void;
 }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,6 +88,7 @@ export default function SettingsSheet({
   const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const installingUpdate = updateStatus === "installing";
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -116,7 +130,7 @@ export default function SettingsSheet({
   }, [returnFocus]);
 
   const close = () => {
-    if (!saving && busyTarget === null) onClose();
+    if (!saving && busyTarget === null && !installingUpdate) onClose();
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -166,8 +180,6 @@ export default function SettingsSheet({
     }
   };
 
-  const installingUpdate = updateStatus === "installing";
-
   return (
     <section
       className="sheet sheet--compact"
@@ -179,7 +191,7 @@ export default function SettingsSheet({
       <header className="sheet-header">
         <div>
           <h2 id="settings-title">Settings</h2>
-          <p>Startup, permissions, and app information.</p>
+          <p>Appearance, startup, updates, and app information.</p>
         </div>
         <button
           className="icon-button icon-button--close"
@@ -204,6 +216,43 @@ export default function SettingsSheet({
 
         {settings && (
           <>
+            <section className="settings-section" aria-labelledby="appearance-settings-title">
+              <div className="settings-section__heading">
+                <h3 id="appearance-settings-title">Appearance</h3>
+              </div>
+              <div className="settings-list">
+                <label className="settings-toggle">
+                  <span>
+                    <strong>Simple view</strong>
+                    <small>Hide window, recovery, placement, URL, and diagnostic details.</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    aria-label="Simple view"
+                    checked={simpleMode}
+                    onChange={(event) => onSimpleModeChange(event.target.checked)}
+                  />
+                </label>
+                <label className="settings-card settings-card--select">
+                  <div>
+                    <strong>Theme</strong>
+                    <small>System follows your current macOS appearance.</small>
+                  </div>
+                  <select
+                    className="settings-select"
+                    aria-label="Theme"
+                    value={theme}
+                    onChange={(event) => onThemeChange(event.target.value as ThemePreference)}
+                  >
+                    <option value="system">System</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
             <section className="settings-section" aria-labelledby="startup-settings-title">
               <div className="settings-section__heading">
                 <h3 id="startup-settings-title">Startup</h3>

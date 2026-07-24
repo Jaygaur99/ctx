@@ -1,13 +1,13 @@
 [package]
 name = "ctx-tauri"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 
 [build-dependencies]
 tauri-build = { version = "2.5.5", features = [] }
 
 [dependencies]
-ctx-core = { version = "1.0.0", path = "../../../crates/ctx-core" }
+ctx-core = { version = "1.0.1", path = "../../../crates/ctx-core" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 tauri = { version = "2.11.5", features = ["tray-icon"] }

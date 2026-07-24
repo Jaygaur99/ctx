@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsSheet from "./SettingsSheet";
 import type { AppSettings } from "./types";
@@ -32,6 +33,22 @@ const settings: AppSettings = {
   release_url: "https://github.com/Jaygaur99/ctx/releases/latest",
 };
 
+function renderSettings(
+  overrides: Partial<ComponentProps<typeof SettingsSheet>> = {},
+) {
+  return render(
+    <SettingsSheet
+      onClose={vi.fn()}
+      returnFocus={null}
+      simpleMode
+      theme="system"
+      onSimpleModeChange={vi.fn()}
+      onThemeChange={vi.fn()}
+      {...overrides}
+    />,
+  );
+}
+
 describe("Ctx settings", () => {
   afterEach(cleanup);
 
@@ -47,7 +64,7 @@ describe("Ctx settings", () => {
   });
 
   it("reports startup, permission, config, and build state", async () => {
-    render(<SettingsSheet onClose={vi.fn()} returnFocus={null} />);
+    renderSettings();
 
     expect(await screen.findByRole("switch", { name: "Launch at login" })).not.toBeChecked();
     expect(screen.getByText("Screen Recording").closest(".settings-card")).toHaveTextContent("Allowed");
@@ -59,7 +76,7 @@ describe("Ctx settings", () => {
   });
 
   it("persists and displays the verified launch-at-login state", async () => {
-    render(<SettingsSheet onClose={vi.fn()} returnFocus={null} />);
+    renderSettings();
     const toggle = await screen.findByRole("switch", { name: "Launch at login" });
 
     fireEvent.click(toggle);
@@ -73,7 +90,7 @@ describe("Ctx settings", () => {
       code: "settings",
       message: "launch agent is unavailable",
     });
-    render(<SettingsSheet onClose={vi.fn()} returnFocus={null} />);
+    renderSettings();
     const toggle = await screen.findByRole("switch", { name: "Launch at login" });
 
     fireEvent.click(toggle);
@@ -83,7 +100,7 @@ describe("Ctx settings", () => {
   });
 
   it("opens only the typed settings destinations", async () => {
-    render(<SettingsSheet onClose={vi.fn()} returnFocus={null} />);
+    renderSettings();
     await screen.findByRole("switch", { name: "Launch at login" });
 
     fireEvent.click(screen.getAllByRole("button", { name: "Open System Settings" })[0]);
@@ -111,7 +128,7 @@ describe("Ctx settings", () => {
       install,
     });
 
-    render(<SettingsSheet onClose={vi.fn()} returnFocus={null} />);
+    renderSettings();
 
     expect(await screen.findByText("Ctx 1.0.1 is available")).toBeInTheDocument();
     expect(screen.getByText("Small fixes")).toBeInTheDocument();
@@ -124,7 +141,7 @@ describe("Ctx settings", () => {
   it("keeps updater failures separate and retryable", async () => {
     updater.checkForUpdate.mockRejectedValue(new Error("release server unavailable"));
 
-    render(<SettingsSheet onClose={vi.fn()} returnFocus={null} />);
+    renderSettings();
 
     expect(await screen.findByText("Couldn’t check for updates")).toBeInTheDocument();
     expect(screen.getByText("release server unavailable")).toBeInTheDocument();
@@ -133,5 +150,20 @@ describe("Ctx settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check Again" }));
 
     expect(await screen.findByText("Ctx is up to date")).toBeInTheDocument();
+  });
+
+  it("changes simple view and theme from the appearance section", async () => {
+    const onSimpleModeChange = vi.fn();
+    const onThemeChange = vi.fn();
+    renderSettings({ onSimpleModeChange, onThemeChange });
+    await screen.findByRole("switch", { name: "Launch at login" });
+
+    fireEvent.click(screen.getByRole("switch", { name: "Simple view" }));
+    expect(onSimpleModeChange).toHaveBeenCalledWith(false);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Theme" }), {
+      target: { value: "light" },
+    });
+    expect(onThemeChange).toHaveBeenCalledWith("light");
   });
 });

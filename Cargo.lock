@@ -651,7 +651,7 @@ checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
 
 [[package]]
 name = "ctx-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "clap",
  "ctx-core",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "ctx-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "accessibility",
  "accessibility-sys",
@@ -682,7 +682,7 @@ dependencies = [
 
 [[package]]
 name = "ctx-tauri"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "ctx-core",
  "serde",

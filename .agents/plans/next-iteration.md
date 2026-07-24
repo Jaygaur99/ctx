@@ -102,9 +102,9 @@ Completed and verified on 2026-07-24. Hide All now preserves only the active con
 
 - [x] Default the context list to Simple Mode.
 - [x] Hide the Windows, Recovery, Placement, URL summary, and diagnostic details while keeping context identity, active state, and everyday actions visible.
-- [x] Keep Detailed Mode one button away and persist the preference locally.
+- [x] Keep Detailed Mode available in Settings and persist the preference locally.
 
-Completed and verified on 2026-07-24. Simple Mode is the default and its one-click Detailed Mode preference survives future popover sessions.
+Completed and verified on 2026-07-24. Simple Mode is the default, its Detailed Mode preference lives in Settings, and the choice survives future popover sessions.
 
 ## Step 7 — Polish, Verify v1.0
 
@@ -125,7 +125,8 @@ Completed and verified on 2026-07-24. Repeated context actions now have distinct
 - [x] Check for updates from Settings and let the user explicitly download, install, and restart.
 - [x] Generate signed updater artifacts and `latest.json` in the tag-only GitHub release workflow.
 - [x] Bump every package and app version together to v1.0.0.
-- [ ] Publish the `v1.0.0` tag and verify the GitHub Release assets.
+- [x] Publish the `v1.0.0` baseline tag and verify its universal DMG.
+- [ ] Publish `v1.0.1` and verify the signed updater archive, signature, and `latest.json` before the installed-app test.
 
 ## Step 9 — Verify and Merge into `main`
 

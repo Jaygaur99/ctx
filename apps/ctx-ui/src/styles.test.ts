@@ -30,5 +30,8 @@ describe("popover appearance", () => {
     expect(styles).toContain(".url-editor-row {");
     expect(styles).toContain(".window-editor-row {");
     expect(styles).toContain(".settings-card");
+    expect(styles).toContain(':root[data-theme="dark"]');
+    expect(styles).toContain(':root:not([data-theme="light"])');
+    expect(styles).toContain(".settings-select");
   });
 });
