@@ -122,10 +122,16 @@ Completed and verified on 2026-07-24. Repeated context actions now have distinct
 
 - [ ] Bump every package/app version together and publish v1.0 through the tag-only release workflow.
 
-## Step 9 - Verify and merge in main
+## Step 9 — Verify and Merge into `main`
 
+- [x] Confirm `main` has no unique commits and the merge is a clean fast-forward.
+- [x] Run Rust formatting, workspace tests, strict Clippy, frontend tests/type-check/build, and `git diff --check`.
+- [x] Refresh the repository knowledge graph.
+- [x] Merge the verified `codex/v1-final` history into local `main` without pushing.
 
-Done when v1.0 is downloadable, documented, and verified through the same path users receive.
+Completed and verified on 2026-07-24. The complete v1 implementation history passes the repository-local quality gate and is merged into local `main`. Step 8 remains intentionally pending for the updater, version bump, and release.
+
+The v1.0 rollout is fully done after Step 8 publishes a downloadable artifact through the release workflow.
 
 ## Still Deferred
 
