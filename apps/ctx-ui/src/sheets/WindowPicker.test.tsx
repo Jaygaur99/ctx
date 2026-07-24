@@ -1,14 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WindowPicker from "./WindowPicker";
-import type { WindowPickerOverview } from "./types";
+import type { WindowPickerOverview } from "../types";
 
 const api = vi.hoisted(() => ({
   addWindowsToWorkspace: vi.fn(),
   getWindowCandidates: vi.fn(),
 }));
 
-vi.mock("./api", () => ({
+vi.mock("../api", () => ({
   ...api,
   normalizeCommandError: (error: unknown) => error,
 }));

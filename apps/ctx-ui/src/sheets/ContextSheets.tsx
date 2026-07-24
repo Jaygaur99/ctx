@@ -4,14 +4,14 @@ import {
   deleteAllWorkspaces,
   deleteWorkspace,
   normalizeCommandError,
-} from "./api";
-import { trapDialogFocus } from "./dialogFocus";
+} from "../api";
+import { trapDialogFocus } from "../dialogFocus";
 import type {
   CommandError,
   CreateWorkspaceReport,
   DeleteWorkspacesReport,
   WorkspaceOverview,
-} from "./types";
+} from "../types";
 
 function SheetError({ error }: { error: CommandError }) {
   return (

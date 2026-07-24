@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { editWorkspace, normalizeCommandError } from "./api";
-import { trapDialogFocus } from "./dialogFocus";
-import type { CommandError, EditWorkspaceReport, WorkspaceOverview } from "./types";
+import { editWorkspace, normalizeCommandError } from "../api";
+import { trapDialogFocus } from "../dialogFocus";
+import type { CommandError, EditWorkspaceReport, WorkspaceOverview } from "../types";
 
 interface UrlRow {
   id: number;

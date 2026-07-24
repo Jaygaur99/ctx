@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ThemePreference } from "./types";
+import type { ThemePreference } from "../types";
 
 const SIMPLE_MODE_KEY = "ctx.simple-mode";
 const THEME_KEY = "ctx.theme";

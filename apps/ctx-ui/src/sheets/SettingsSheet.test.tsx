@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsSheet from "./SettingsSheet";
-import type { AppSettings } from "./types";
+import type { AppSettings } from "../types";
 
 const api = vi.hoisted(() => ({
   getAppSettings: vi.fn(),
@@ -14,12 +14,12 @@ const updater = vi.hoisted(() => ({
   checkForUpdate: vi.fn(),
 }));
 
-vi.mock("./api", () => ({
+vi.mock("../api", () => ({
   ...api,
   normalizeCommandError: (error: unknown) => error,
 }));
 
-vi.mock("./updater", () => updater);
+vi.mock("../updater", () => updater);
 
 const settings: AppSettings = {
   launch_at_login: false,

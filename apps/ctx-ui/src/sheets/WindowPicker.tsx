@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { addWindowsToWorkspace, getWindowCandidates, normalizeCommandError } from "./api";
-import { trapDialogFocus } from "./dialogFocus";
+import { addWindowsToWorkspace, getWindowCandidates, normalizeCommandError } from "../api";
+import { trapDialogFocus } from "../dialogFocus";
 import type {
   AddWindowsReport,
   CommandError,
   WindowCandidate,
   WindowPickerOverview,
-} from "./types";
+} from "../types";
 
 function CandidateRow({
   candidate,
