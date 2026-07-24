@@ -62,6 +62,15 @@ permissions without requiring a reinstall.
 
 Release builds are ad-hoc signed but are not yet Apple-notarized. On first launch, macOS may require you to right-click **Ctx.app**, choose **Open**, and confirm, or allow it under **System Settings → Privacy & Security**.
 
+If macOS still blocks the app, and you downloaded it from the official Ctx GitHub Release,
+remove its quarantine attribute after moving it to `/Applications`:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Ctx.app
+```
+
+Only run this command for a Ctx release that you trust.
+
 ## Quick start
 
 1. Click the Ctx menu-bar icon.
